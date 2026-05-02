@@ -1,0 +1,202 @@
+/* ============================================================
+   暮山紫 (Mu-Shan-Zi) — aichat 默认主题
+
+   灵感源自晚霞浸染的远山，以朦胧、渐变的紫黛色调，
+   描绘暮色中光影的交织。色彩晕染如烟似雾，
+   既蕴含宋代山水画的留白意境，又融入了西方浪漫主义的瑰丽笔触，
+   在虚实之间勾勒出东方诗性与西方色彩的和鸣。
+
+   暗色模式为默认 (:root)，亮色模式通过 [theme-mode='light'] 切换。
+   ============================================================ */
+
+/* ===== 暗色主题 (默认) ===== */
+:root {
+  /* 基础色板 */
+  --color-white: #f4f7fb;
+  --color-white-soft: #f4f7fb;
+  --color-white-mute: rgba(244, 247, 251, 0.94);
+
+  --color-black: #3d5770;
+  --color-black-soft: #4c5d86;
+  --color-black-mute: #5a6f96;
+
+  --color-gray-1: #6887af;
+  --color-gray-2: #5e79a2;
+  --color-gray-3: #7a98c1;
+
+  /* 文字层级 */
+  --color-text-1: #e6edf7;
+  --color-text-2: rgba(230, 235, 247, 0.6);
+  --color-text-3: rgba(230, 235, 247, 0.38);
+
+  /* 背景层级 */
+  --color-background: #4c6486;
+  --color-background-soft: #688baf;
+  --color-background-mute: #5a6f96;
+  --color-background-opacity: rgba(76, 100, 134, 0.85);
+
+  /* 主色调 */
+  --color-primary: #6887af;
+  --color-primary-soft: rgba(104, 125, 175, 0.6);
+  --color-primary-mute: rgba(104, 130, 175, 0.2);
+
+  /* 语义色 */
+  --color-text: #e6edf7;
+  --color-text-secondary: rgba(230, 235, 247, 0.7);
+  --color-icon: rgba(230, 235, 247, 0.6);
+  --color-icon-white: #e6edf7;
+  --color-border: rgba(230, 235, 247, 0.15);
+  --color-border-soft: rgba(230, 235, 247, 0.08);
+  --color-border-mute: rgba(230, 235, 247, 0.05);
+  --color-error: #ff7675;
+  --color-link: #a0c4ff;
+  --color-hover: #5e79a2;
+  --color-active: #7a98c1;
+  --color-group-background: var(--color-background-soft);
+
+  /* 代码块 */
+  --color-code-background: #3d546e;
+  --color-inline-code-background: #3d546e;
+  --color-inline-code-text: #fab387;
+
+  /* 列表项 */
+  --color-list-item: var(--color-background-soft);
+  --color-list-item-hover: var(--color-background-soft);
+  --list-item-border-radius: 10px;
+
+  /* 模态框 */
+  --modal-background: #4c6286;
+
+  /* 导航栏 */
+  --navbar-background-mac: rgba(76, 100, 134, 0.85);
+  --navbar-background: #4c6286;
+
+  /* 聊天气泡 */
+  --chat-background: #4c6386;
+  --chat-background-user: #6886af;
+  --chat-background-assistant: #3d5770;
+  --chat-text-user: #e6ebf7;
+
+  /* 引用块 */
+  --color-reference: #5a6f96;
+  --color-reference-text: #e6edf7;
+  --color-reference-background: #3d546e;
+
+  /* 状态色 */
+  --color-status-success: #74b9ff;
+  --color-status-error: var(--color-error);
+  --color-status-warning: #fdcb6e;
+
+  /* 搜索高亮 */
+  --color-highlight: rgba(0, 0, 0, 1);
+  --color-background-highlight: rgba(160, 196, 255, 0.5);
+  --color-background-highlight-accent: rgba(253, 203, 110, 0.5);
+
+  /* 毛玻璃效果 */
+  --inner-glow-opacity: 0.3;
+
+  /* 边框 */
+  --color-frame-border: #5a6f96;
+
+  /* ===== 字体 ===== */
+  --font-family:
+    'Ubuntu', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, Oxygen,
+    Cantarell, 'Open Sans', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --code-font-family:
+    'Cascadia Code', 'Fira Code', 'Consolas', Menlo, Courier, monospace;
+
+  /* ===== 滚动条 ===== */
+  --color-scrollbar-thumb: rgba(230, 235, 247, 0.15);
+  --color-scrollbar-thumb-hover: rgba(230, 235, 247, 0.25);
+  --scrollbar-width: 6px;
+  --scrollbar-height: 6px;
+  --scrollbar-thumb-radius: 10px;
+}
+
+/* ===== 亮色主题 ===== */
+[theme-mode='light'] {
+  /* 主色调 */
+  --color-primary: #687eaf;
+  --color-primary-soft: rgba(104, 120, 175, 0.6);
+  --color-primary-mute: rgba(104, 134, 175, 0.2);
+
+  /* 基础色板 */
+  --color-white: #f4f6fb;
+  --color-white-soft: #f0f3f9;
+  --color-white-mute: #dfe5f5;
+
+  --color-black: #4c5e86;
+  --color-black-soft: #5a6f96;
+  --color-black-mute: #6887af;
+
+  --color-gray-1: #7a8fb8;
+  --color-gray-2: #b3c8e8;
+  --color-gray-3: #ccdaf0;
+
+  /* 文字层级 */
+  --color-text-1: #4c5e86;
+  --color-text-2: rgba(76, 92, 134, 0.6);
+  --color-text-3: rgba(76, 92, 134, 0.38);
+
+  /* 背景层级 */
+  --color-background: #e6ecf7;
+  --color-background-soft: #ccdaf0;
+  --color-background-mute: #b3c8e8;
+  --color-background-opacity: rgba(230, 236, 247, 0.85);
+  --inner-glow-opacity: 0.1;
+
+  /* 语义色 */
+  --color-text: #4c5e86;
+  --color-text-secondary: rgba(76, 92, 134, 0.75);
+  --color-icon: rgba(76, 92, 134, 0.6);
+  --color-icon-white: #4c5e86;
+  --color-border: rgba(76, 92, 134, 0.12);
+  --color-border-soft: rgba(76, 95, 134, 0.06);
+  --color-border-mute: rgba(76, 95, 134, 0.04);
+  --color-link: #687eaf;
+  --color-hover: #eaf0f8;
+  --color-active: #dfe5f5;
+  --color-group-background: #f4f6fb;
+
+  /* 代码块 */
+  --color-code-background: #ccdaf0;
+  --color-inline-code-background: rgba(76, 92, 134, 0.08);
+  --color-inline-code-text: #c0392b;
+
+  /* 列表项 */
+  --color-list-item: var(--color-background-soft);
+  --color-list-item-hover: var(--color-background-soft);
+
+  /* 模态框 */
+  --modal-background: #f4f6fb;
+
+  /* 导航栏 */
+  --navbar-background-mac: rgba(240, 243, 249, 0.85);
+  --navbar-background: #f0f3f9;
+
+  /* 聊天气泡 */
+  --chat-background: #f4f6fb;
+  --chat-background-user: #e6ecf7;
+  --chat-background-assistant: #ccd7f0;
+  --chat-text-user: var(--color-text);
+
+  /* 引用块 */
+  --color-reference: #ccdaf0;
+  --color-reference-text: #4c5e86;
+  --color-reference-background: #eaf0f8;
+
+  /* 状态色 */
+  --color-status-success: #00b894;
+
+  /* 边框 */
+  --color-frame-border: #b3c8e8;
+
+  /* 滚动条 */
+  --color-scrollbar-thumb: rgba(76, 92, 134, 0.15);
+  --color-scrollbar-thumb-hover: rgba(76, 92, 134, 0.25);
+
+  /* 搜索高亮 */
+  --color-highlight: initial;
+  --color-background-highlight: rgba(104, 126, 175, 0.3);
+  --color-background-highlight-accent: rgba(253, 203, 110, 0.4);
+}

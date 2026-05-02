@@ -1,0 +1,135 @@
+/* ============================================================
+   全局样式入口 — 汇聚所有样式文件
+   ============================================================ */
+
+@import './tokens.css';
+@import './tailwind.css';
+@import './animations.css';
+
+/* ===== 全局重置与基础样式 ===== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  font-weight: normal;
+}
+
+*:focus {
+  outline-style: none;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  min-height: 100vh;
+  color: var(--color-text);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow: hidden;
+  font-family: var(--font-family);
+  text-rendering: optimizeLegibility;
+  transition: background-color 0.3s linear;
+  background-color: var(--color-background);
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 可选中文本的区域 */
+input,
+textarea,
+[contenteditable='true'],
+.markdown,
+.selectable,
+pre,
+code {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+a {
+  -webkit-user-drag: none;
+}
+
+ul {
+  list-style: none;
+}
+
+/* ===== 自定义滚动条 ===== */
+::-webkit-scrollbar {
+  width: var(--scrollbar-width);
+  height: var(--scrollbar-height);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: var(--scrollbar-thumb-radius);
+  background: var(--color-scrollbar-thumb);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-thumb-hover);
+}
+
+/* ===== 文本截断工具类 ===== */
+.text-nowrap {
+  display: -webkit-box !important;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  line-clamp: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-wrap: break-word;
+}
+
+/* ===== emoji-picker-element 自定义样式 ===== */
+emoji-picker {
+  --background: var(--color-background) !important;
+  --border-radius: 12px !important;
+  --font-family: var(--font-family) !important;
+  --emoji-size: 20px !important;
+  --num-columns: 8 !important;
+}
+
+emoji-picker.light {
+  --background: #f4f6fb !important;
+  --border-color: rgba(76, 92, 134, 0.12) !important;
+  --button-hover-background: rgba(76, 92, 134, 0.06) !important;
+  --text-color: #4c5e86 !important;
+  --text-secondary-color: rgba(76, 92, 134, 0.6) !important;
+  --input-border-color: rgba(76, 92, 134, 0.12) !important;
+  --input-background: #e6ecf7 !important;
+}
+
+emoji-picker.dark {
+  --background: #4c6486 !important;
+  --border-color: rgba(230, 235, 247, 0.15) !important;
+  --button-hover-background: rgba(230, 235, 247, 0.06) !important;
+  --text-color: #e6edf7 !important;
+  --text-secondary-color: rgba(230, 235, 247, 0.6) !important;
+  --input-border-color: rgba(230, 235, 247, 0.15) !important;
+  --input-background: #3d546e !important;
+}
+
+/* ===== 图标颜色统一 ===== */
+.lucide:not(.lucide-custom) {
+  color: var(--color-icon);
+}

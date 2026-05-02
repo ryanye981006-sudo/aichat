@@ -1,0 +1,6 @@
+/* index.css 已被 global.css 替代，保留作为备用 */
+
+/* 临时诊断：检查 CSS 变量是否加载 */
+:root {
+  --debug: 'CSS loaded';
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Chat</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- 诊断：捕获全局错误并显示 -->
+    <div id="__error_diag" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#1a1a2e;color:#ff6b6b;z-index:99999;padding:40px;font-family:monospace;font-size:14px;overflow-y:auto;white-space:pre-wrap;"></div>
+    <script>
+      window.__reactError = null;
+      window.addEventListener('error', function(e) {
+        var el = document.getElementById('__error_diag');
+        el.style.display = 'block';
+        el.textContent = '🔴 全局错误:\\n\\n' + (e.message || '未知错误') + '\\n\\n文件: ' + (e.filename || 'N/A') + '\\n行号: ' + (e.lineno || 'N/A') + '\\n\\n' + (e.error && e.error.stack || '');
+        window.__reactError = e;
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var el = document.getElementById('__error_diag');
+        el.style.display = 'block';
+        el.textContent = '🔴 未处理的 Promise 拒绝:\\n\\n' + (e.reason && (e.reason.message || e.reason) || '未知');
+        window.__reactError = e;
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
