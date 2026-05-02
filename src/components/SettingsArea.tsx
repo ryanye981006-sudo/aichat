@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { Provider, Model, KnowledgeBase, KnowledgeDocument, MemorySettings, MemoryEntry } from '../types';
 import { cn } from '../lib/utils';
 import { providersApi, modelsApi, knowledgeApi, memoryApi } from '../services/api';
-import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Trash2, Upload, X, ChevronRight, FileText, RefreshCw } from 'lucide-react';
+import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle } from 'lucide-react';
 
 // ===== 通用 Toggle 组件 =====
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -16,6 +16,22 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void 
         checked ? "left-[22px]" : "left-1")} />
     </button>
   );
+}
+
+// 与后端一致的 base_url 规范化逻辑，用于前端预览
+function normalizeBaseUrl(url: string): string {
+  let cleaned = url
+    .replace(/\/chat\/completions\/?$/, '')
+    .replace(/\/embeddings\/?$/, '')
+    .replace(/\/models\/?$/, '')
+    .replace(/\/+$/, '');
+  try {
+    const pathname = new URL(cleaned).pathname;
+    if (!/\/v\d+(\/|$)/.test(pathname)) {
+      cleaned = cleaned + '/v1';
+    }
+  } catch { /* URL 无效时不做处理 */ }
+  return cleaned.replace(/\/+$/, '');
 }
 
 interface SettingsAreaProps {
@@ -35,7 +51,11 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const [testing, setTesting] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [fetchError, setFetchError] = useState('');
   const [fetchedModels, setFetchedModels] = useState<any>(null);
+  const [testingModels, setTestingModels] = useState(false);
+  const [showTestConfirm, setShowTestConfirm] = useState(false);
+  const [modelTestResults, setModelTestResults] = useState<Record<string, { status: 'success' | 'error'; time: number; error?: string }>>({});
 
   // ===== RAG 状态 =====
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -55,20 +75,7 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     loadProviders();
     loadKnowledgeBases();
     loadMemoryData();
-    // 清除名为"1"的供应商下的所有模型
-    clearProviderOneModels();
   }, []);
-
-  const clearProviderOneModels = async () => {
-    try {
-      const ps = await providersApi.list();
-      const provider1 = ps.find(p => p.name === '1');
-      if (provider1) {
-        await providersApi.clearModels(provider1.id);
-        loadProviders(); // 重新加载
-      }
-    } catch (e) { console.error(e); }
-  };
 
   const loadProviders = async () => {
     try {
@@ -144,23 +151,16 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const handleFetchModels = async () => {
     if (!selectedProviderId) return;
     setFetching(true);
+    setFetchError('');
     try {
       const data = await providersApi.fetchModels(selectedProviderId);
       setFetchedModels(data);
       setShowFetchModels(true);
     } catch (e) {
-      console.error(e);
+      setFetchError(e instanceof Error ? e.message : '获取模型列表失败');
     } finally {
       setFetching(false);
     }
-  };
-
-  const handleClearModels = async () => {
-    if (!selectedProviderId) return;
-    try {
-      await providersApi.clearModels(selectedProviderId);
-      setModels(prev => prev.filter(m => m.provider_id !== selectedProviderId));
-    } catch (e) { console.error(e); }
   };
 
   const handleRemoveModel = async (modelId: string) => {
@@ -170,6 +170,29 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     } catch (e) { console.error(e); }
   };
 
+  const handleTestModels = async () => {
+    if (!selectedProviderId) return;
+    setShowTestConfirm(true);
+  };
+
+  const handleConfirmTestModels = async () => {
+    if (!selectedProviderId) return;
+    setShowTestConfirm(false);
+    setTestingModels(true);
+    setModelTestResults({});
+    try {
+      const { results } = await providersApi.testModels(selectedProviderId);
+      const statusMap: Record<string, { status: 'success' | 'error'; time: number; error?: string }> = {};
+      for (const r of results) {
+        statusMap[r.model_id] = { status: r.success ? 'success' : 'error', time: r.time, error: r.error };
+      }
+      setModelTestResults(statusMap);
+    } catch (e) {
+      console.error('模型测试失败:', e);
+    } finally {
+      setTestingModels(false);
+    }
+  };
 
   const handleCreateKb = async (name: string) => {
     try {
@@ -307,6 +330,11 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                       style={{ backgroundColor: 'var(--color-background)', borderColor, color: textColor, '--tw-ring-color': primaryColor } as React.CSSProperties}
                       placeholder="https://api.openai.com/v1"
                     />
+                    {selectedProvider.base_url && (
+                      <p className="text-xs mt-1.5" style={{ color: textSecondary }}>
+                        聊天地址: <span style={{ color: 'var(--color-primary)' }}>{normalizeBaseUrl(selectedProvider.base_url)}/chat/completions</span>
+                      </p>
+                    )}
                   </div>
 
                   {/* Models */}
@@ -317,13 +345,15 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                         <span className="px-2 py-0.5 rounded-full text-xs" style={{ backgroundColor: bgMute, color: textSecondary }}>
                           {providerModels.length}
                         </span>
+                        {providerModels.length > 0 && (
+                          <button onClick={handleTestModels} disabled={testingModels}
+                            className="p-1 rounded transition-colors hover:opacity-80 disabled:opacity-50"
+                            style={{ color: textSecondary }} title="模型健康检测">
+                            {testingModels ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
                       </label>
                       <div className="flex items-center gap-2">
-                        <button onClick={handleClearModels}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:opacity-80"
-                          style={{ borderColor: '#ef4444', color: '#ef4444' }}>
-                          <Trash2 className="w-3.5 h-3.5" /> 清空
-                        </button>
                         <div className="flex rounded-lg border overflow-hidden" style={{ borderColor }}>
                           <button onClick={handleFetchModels} disabled={fetching}
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-80 disabled:opacity-50"
@@ -340,20 +370,41 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                         </div>
                       </div>
                     </div>
+                    {fetchError && (
+                      <p className="text-xs mb-3" style={{ color: '#ef4444' }}>{fetchError}</p>
+                    )}
                     <div className="rounded-xl border overflow-hidden mb-3" style={{ borderColor }}>
-                      {providerModels.map(m => (
+                      {providerModels.map(m => {
+                        const test = modelTestResults[m.id];
+                        return (
                         <div key={m.id} className="flex items-center justify-between px-4 py-3 border-b last:border-0 transition-colors"
                           style={{ borderColor }}>
                           <div className="flex items-center gap-3">
                             <Box className="w-4 h-4" style={{ color: textSecondary }} />
                             <span className="text-sm font-medium" style={{ color: textColor }}>{m.display_name || m.name}</span>
                           </div>
-                          <button onClick={() => handleRemoveModel(m.id)}
-                            className="p-1 rounded transition-colors hover:bg-red-50" style={{ color: textSecondary }}>
-                            <Minus className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            {testingModels && !test && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: textSecondary }} />
+                            )}
+                            {test && test.status === 'success' && (
+                              <span className="flex items-center gap-1 text-xs" style={{ color: '#22c55e' }} title={`${test.time}ms`}>
+                                <CheckCircle className="w-3.5 h-3.5" /> {test.time}ms
+                              </span>
+                            )}
+                            {test && test.status === 'error' && (
+                              <span className="flex items-center gap-1 text-xs cursor-help" style={{ color: '#ef4444' }} title={test.error || '未知错误'}>
+                                <XCircle className="w-3.5 h-3.5" />
+                              </span>
+                            )}
+                            <button onClick={() => handleRemoveModel(m.id)}
+                              className="p-1 rounded transition-colors hover:bg-red-50" style={{ color: textSecondary }}>
+                              <Minus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
-                      ))}
+                        );
+                      })}
                       {providerModels.length === 0 && (
                         <div className="p-6 text-center text-sm" style={{ color: textSecondary }}>暂无模型</div>
                       )}
@@ -606,6 +657,33 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
           onSave={handleUpdateMemorySettings}
         />
       )}
+
+      {showTestConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-md overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>模型健康检测</h3>
+              <button onClick={() => setShowTestConfirm(false)} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="p-3 rounded-lg border" style={{ backgroundColor: '#fef3c7', borderColor: '#f59e0b' }}>
+                <p className="text-sm font-medium" style={{ color: '#92400e' }}>健康检查需要发送请求，请谨慎使用。</p>
+                <p className="text-sm mt-1" style={{ color: '#a16207' }}>按次收费的模型可能产生更多费用，请自行承担。</p>
+              </div>
+              <p className="text-xs" style={{ color: 'var(--color-text-2)' }}>
+                将对当前列表中的 {providerModels.length} 个模型逐一发送测试请求，每次最多等待 15 秒。
+              </p>
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => setShowTestConfirm(false)} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+              <button onClick={handleConfirmTestModels}
+                className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: '#12C175' }}>开始</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -724,18 +802,30 @@ function FetchModelsModal({
   const [searchText, setSearchText] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
 
+  // 从模型 ID 提取厂商前缀分组
+  // "MiniMax/MiniMax-M2.7" → "MiniMax"  (有 / 则取 / 前部分)
+  // "MiniMax-M2.5"        → "MiniMax"  (无 / 则取前导字母)
+  // "qwen3.6-flash"       → "qwen"
+  const extractGroup = (id: string): string => {
+    const slashIdx = id.indexOf('/');
+    if (slashIdx !== -1) return id.slice(0, slashIdx);
+    const match = id.match(/^[A-Za-z]+/);
+    return match ? match[0] : '其他';
+  };
+
   // Parse models into groups
   const groups: Record<string, any[]> = {};
   if (models.data) {
     for (const model of models.data) {
-      const category = model.category || model.category_name || '其他';
-      if (!groups[category]) groups[category] = [];
-      groups[category].push(model);
+      const group = extractGroup(model.id || model.name || '');
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(model);
     }
   }
 
   const allModels = models.data || [];
-  const categories = Object.keys(groups);
+  // 按模型数量降序排列分组
+  const categories = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
 
   const filteredModels = allModels.filter((m: any) => {
     if (!searchText) return true;
@@ -779,18 +869,6 @@ function FetchModelsModal({
   const isSelected = (id: string) => selectedIds.has(id);
   const isExisting = (id: string) => existingModelNames.includes(id);
 
-  const categoryLabels: Record<string, string> = {
-    'all': '全部',
-    '推理': '推理',
-    '视觉': '视觉',
-    '联网': '联网',
-    '免费': '免费',
-    '嵌入': '嵌入',
-    '重排': '重排',
-    '工具': '工具',
-    '其他': '其他',
-  };
-
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
       <div className="rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)', maxHeight: '85vh' }}>
@@ -826,7 +904,7 @@ function FetchModelsModal({
               </button>
             </div>
           </div>
-          <div className="flex gap-1 overflow-x-auto">
+          <div className="flex gap-1 flex-wrap">
             <button
               onClick={() => setActiveCategory('all')}
               className={cn("px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-colors",
@@ -838,7 +916,7 @@ function FetchModelsModal({
               }}>
               全部
             </button>
-            {categories.filter(c => c !== '其他').map(cat => (
+            {categories.map(cat => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
@@ -849,7 +927,7 @@ function FetchModelsModal({
                   borderColor: activeCategory === cat ? 'var(--color-primary)' : 'var(--color-border)',
                   color: activeCategory === cat ? 'white' : 'var(--color-text-2)',
                 }}>
-                {categoryLabels[cat] || cat}
+{cat.charAt(0).toUpperCase() + cat.slice(1)}
               </button>
             ))}
           </div>
@@ -866,7 +944,7 @@ function FetchModelsModal({
               <div key={category} className="mb-3">
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-xs font-medium" style={{ color: 'var(--color-text-2)' }}>
-                    {categoryLabels[category] || category}
+                    {category.charAt(0).toUpperCase() + category.slice(1)}
                   </span>
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-background-soft)', color: 'var(--color-text-3)' }}>
                     {catModels.length}

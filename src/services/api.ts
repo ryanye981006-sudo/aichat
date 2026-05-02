@@ -44,6 +44,7 @@ export const providersApi = {
   remove: (id: string) => request<any>(`/providers/${id}`, { method: 'DELETE' }),
   test: (id: string) => request<any>(`/providers/${id}/test`, { method: 'POST' }),
   fetchModels: (id: string) => request<any>(`/providers/${id}/fetch-models`, { method: 'POST' }),
+  testModels: (id: string) => request<any>(`/providers/${id}/test-models`, { method: 'POST' }),
   clearModels: (id: string) => request<any>(`/providers/${id}/models`, { method: 'DELETE' }),
 };
 

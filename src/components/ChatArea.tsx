@@ -136,7 +136,7 @@ export default function ChatArea({
                 {/* 头像 */}
                 <div className="mt-1 shrink-0">
                   {isUser ? (
-                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: '#22c55e' }}>
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ backgroundColor: '#12C175' }}>
                       <User className="w-5 h-5" />
                     </div>
                   ) : (

@@ -111,11 +111,27 @@ router.post('/:id/test', async (req, res) => {
   }
 });
 
+// 检测当前供应商下所有模型的连通性
+router.post('/:id/test-models', async (req, res) => {
+  try {
+    const db = getDb();
+    const models = db.prepare('SELECT * FROM models WHERE provider_id = ?').all(req.params.id) as any[];
+    const results = [];
+    for (const model of models) {
+      const r = await aiService.testModel(req.params.id, model.id);
+      results.push({ model_id: model.id, model_name: model.name, ...r });
+    }
+    res.json({ results });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
 // 自动拉取模型列表
 router.post('/:id/fetch-models', async (req, res) => {
   try {
     const models = await aiService.fetchModels(req.params.id);
-    res.json(models);
+    res.json({ data: models });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
