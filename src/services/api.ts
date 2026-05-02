@@ -87,11 +87,12 @@ export function chatSSE(
   assistantId: string,
   message: string,
   conversationId: string | null,
+  thinkingMode: string = 'default',
   callbacks: {
     onToken: (token: string) => void;
     onParsed: (thoughtProcess: string, displayContent: string) => void;
     onMeta: (conversationId: string) => void;
-    onDone: (messageId: string, content: string, thoughtProcess: string | null) => void;
+    onDone: (messageId: string, content: string, thoughtProcess: string | null, metrics?: any, aborted?: boolean) => void;
     onError: (error: string) => void;
   }
 ): AbortController {
@@ -104,6 +105,7 @@ export function chatSSE(
       assistant_id: assistantId,
       conversation_id: conversationId,
       message,
+      thinking_mode: thinkingMode,
     }),
     signal: controller.signal,
   }).then(async (response) => {
@@ -146,7 +148,7 @@ export function chatSSE(
               callbacks.onParsed(data.thoughtProcess, data.displayContent);
               break;
             case 'done':
-              callbacks.onDone(data.message_id, data.content, data.thoughtProcess);
+              callbacks.onDone(data.message_id, data.content, data.thoughtProcess, data.metrics, data.aborted);
               break;
             case 'error':
               callbacks.onError(data.message);
@@ -169,10 +171,11 @@ export function regenerateSSE(
   assistantId: string,
   conversationId: string,
   messageId: string,
+  thinkingMode: string = 'default',
   callbacks: {
     onToken: (token: string) => void;
     onParsed: (thoughtProcess: string, displayContent: string) => void;
-    onDone: (messageId: string, content: string, thoughtProcess: string | null) => void;
+    onDone: (messageId: string, content: string, thoughtProcess: string | null, metrics?: any, aborted?: boolean) => void;
     onError: (error: string) => void;
   }
 ): AbortController {
@@ -185,6 +188,7 @@ export function regenerateSSE(
       assistant_id: assistantId,
       conversation_id: conversationId,
       message_id: messageId,
+      thinking_mode: thinkingMode,
     }),
     signal: controller.signal,
   }).then(async (response) => {
@@ -224,7 +228,7 @@ export function regenerateSSE(
               callbacks.onParsed(data.thoughtProcess, data.displayContent);
               break;
             case 'done':
-              callbacks.onDone(data.message_id, data.content, data.thoughtProcess);
+              callbacks.onDone(data.message_id, data.content, data.thoughtProcess, data.metrics, data.aborted);
               break;
             case 'error':
               callbacks.onError(data.message);

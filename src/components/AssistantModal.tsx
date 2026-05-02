@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
 import type { Assistant, Provider, Model } from '../types';
 import { cn } from '../lib/utils';
+import { isReasoningModel } from '../lib/reasoning';
 import EmojiIcon from './shared/EmojiIcon';
 import EmojiPicker from './shared/EmojiPicker';
 
@@ -35,6 +36,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
   const [temperature, setTemperature] = useState(0.7);
   const [contextRounds, setContextRounds] = useState(10);
   const [enableMemory, setEnableMemory] = useState(false);
+  const [thinkingMode, setThinkingMode] = useState('default');
 
   useEffect(() => {
     if (isOpen) {
@@ -48,6 +50,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setTemperature(assistant.temperature ?? 0.7);
         setContextRounds(assistant.context_rounds ?? 10);
         setEnableMemory(!!assistant.enable_memory);
+        setThinkingMode(assistant.thinking_mode || 'default');
       } else {
         setName('');
         setSystemPrompt('');
@@ -58,6 +61,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setTemperature(0.7);
         setContextRounds(10);
         setEnableMemory(false);
+        setThinkingMode('default');
       }
       setActiveTab('prompt');
       setShowEmojiPicker(false);
@@ -79,6 +83,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
       temperature,
       context_rounds: contextRounds,
       enable_memory: enableMemory ? 1 : 0,
+      thinking_mode: thinkingMode,
     });
     onClose();
   };
@@ -288,6 +293,37 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                       style={{ accentColor: 'var(--color-primary)' }}
                     />
                   </div>
+
+                  {/* Deep Thinking Mode — 仅在选定模型支持推理时显示 */}
+                  {(() => {
+                    const selectedModel = models.find(m => m.id === modelId);
+                    return isReasoningModel(selectedModel) ? (
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>深度思考</label>
+                        </div>
+                        <select
+                          value={thinkingMode}
+                          onChange={e => setThinkingMode(e.target.value)}
+                          className="w-full px-4 py-2.5 rounded-xl border focus:outline-none text-sm appearance-none"
+                          style={{
+                            backgroundColor: 'var(--color-background)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)',
+                          }}
+                        >
+                          <option value="default">默认（按模型行为）</option>
+                          <option value="enabled">开启</option>
+                          <option value="disabled">关闭</option>
+                        </select>
+                        <div className="text-xs mt-1" style={{ color: 'var(--color-text-3)' }}>
+                          {thinkingMode === 'default' ? '由模型自行决定是否输出思考过程' :
+                           thinkingMode === 'enabled' ? '强制模型输出深度思考过程' :
+                           '禁止模型输出思考过程，直接给出答案'}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
 
                   {/* Memory Toggle */}
                   <div className="flex items-center justify-between">

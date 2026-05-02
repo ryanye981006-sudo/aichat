@@ -10,8 +10,16 @@ export interface ChatMessage {
 
 export interface StreamCallbacks {
   onToken: (token: string) => void
-  onComplete: (fullText: string) => void
+  onComplete: (fullText: string, metrics?: StreamMetrics) => void
   onError: (error: Error) => void
+}
+
+export interface StreamMetrics {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  ttftMs: number        // 首字时延 (Time To First Token)
+  tokensPerSecond: number
 }
 
 // 规范化 base_url：
@@ -60,7 +68,8 @@ export class AiSdkService {
     modelId: string,
     providerId: string,
     temperature: number,
-    callbacks: StreamCallbacks
+    callbacks: StreamCallbacks,
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     const db = getDb()
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
@@ -75,21 +84,77 @@ export class AiSdkService {
       return
     }
 
+    // 检查是否已被取消
+    if (abortSignal?.aborted) {
+      callbacks.onError(new Error('请求被中止'))
+      return
+    }
+
     try {
+      const startTime = Date.now();
+      let firstTokenTime = 0;
+      let fullText = '';
+
       const result = await _streamText({
         model: createModel(provider, model),
         messages,
         temperature,
+        abortSignal,
       })
 
-      let fullText = ''
-      for await (const chunk of result.textStream) {
-        fullText += chunk
-        callbacks.onToken(chunk)
+      // 使用 fullStream 消费 —— 既可获取文本也能从 finish 事件获取 usage
+      for await (const part of result.fullStream) {
+        if (abortSignal?.aborted) break;
+
+        switch (part.type) {
+          case 'text-delta': {
+            if (firstTokenTime === 0) {
+              firstTokenTime = Date.now();
+            }
+            const text = part.text;
+            fullText += text;
+            callbacks.onToken(text);
+            break;
+          }
+          case 'error': {
+            callbacks.onError(new Error(String(part.error)));
+            return;
+          }
+        }
       }
 
-      callbacks.onComplete(fullText)
-    } catch (err) {
+      // 如果被中止，不触发 onComplete
+      if (abortSignal?.aborted) {
+        return;
+      }
+
+      // 收集用量和性能指标
+      let metrics: StreamMetrics | undefined;
+      try {
+        const usage = await result.usage;
+        const endTime = Date.now();
+        const inputTokens = usage.inputTokens || 0;
+        const outputTokens = usage.outputTokens || 0;
+        const ttftMs = firstTokenTime > 0 ? firstTokenTime - startTime : 0;
+        const generationTime = firstTokenTime > 0 ? endTime - firstTokenTime : 1;
+        const tokensPerSecond = generationTime > 0 ? Math.round(outputTokens / (generationTime / 1000)) : 0;
+
+        metrics = {
+          promptTokens: inputTokens,
+          completionTokens: outputTokens,
+          totalTokens: inputTokens + outputTokens,
+          ttftMs,
+          tokensPerSecond,
+        };
+      } catch {
+        console.warn('[AiSdkService] 无法获取 token 用量信息');
+      }
+
+      callbacks.onComplete(fullText, metrics)
+    } catch (err: any) {
+      if (err?.name === 'AbortError' || abortSignal?.aborted) {
+        return; // 用户主动取消，不报错
+      }
       console.error('[AiSdkService] streamText 异常:', err)
       callbacks.onError(err instanceof Error ? err : new Error(String(err)))
     }

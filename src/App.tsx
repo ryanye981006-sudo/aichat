@@ -20,6 +20,7 @@ export default function App() {
   const [isSettingsMode, setIsSettingsMode] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -56,10 +57,31 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  // 将服务端扁平列转换为前端 metrics 对象
+  const normalizeMessageMetrics = (msg: any): Message => {
+    if (msg.metrics) return msg; // 已经是 metrics 对象
+    const promptTokens = msg.prompt_tokens ?? 0;
+    const completionTokens = msg.completion_tokens ?? 0;
+    // 只有确实有 token 数据时才生成 metrics（排除全 NULL 或全 0 的情况）
+    if (promptTokens > 0 || completionTokens > 0) {
+      return {
+        ...msg,
+        metrics: {
+          promptTokens,
+          completionTokens,
+          totalTokens: promptTokens + completionTokens,
+          ttftMs: msg.ttft_ms ?? 0,
+          tokensPerSecond: msg.tokens_per_second ?? 0,
+        },
+      };
+    }
+    return msg;
+  };
+
   const loadMessages = async (conversationId: string) => {
     try {
       const msgs = await messagesApi.list(conversationId);
-      setMessages(msgs);
+      setMessages(msgs.map(normalizeMessageMetrics));
     } catch (e) { console.error(e); }
   };
 
@@ -123,7 +145,6 @@ export default function App() {
   const handleSelectConversation = useCallback((id: string) => {
     setCurrentConversationId(id);
     setIsSettingsMode(false);
-    setMessages([]);
     loadMessages(id);
     const conv = conversations.find(c => c.id === id);
     if (conv) {
@@ -143,7 +164,7 @@ export default function App() {
   };
 
   // ===== 发送消息 =====
-  const handleSendMessage = useCallback(async (content: string) => {
+  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default') => {
     if (!currentAssistantId || isStreaming) return;
 
     let activeConvId = currentConversationId;
@@ -193,7 +214,7 @@ export default function App() {
 
     let fullRawContent = '';
 
-    chatSSE(currentAssistantId, content, activeConvId, {
+    const controller = chatSSE(currentAssistantId, content, activeConvId, thinkingMode, {
       onMeta(convId) {
         if (convId !== activeConvId) {
           setCurrentConversationId(convId);
@@ -211,13 +232,14 @@ export default function App() {
           m.id === aiMsg.id ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
         ));
       },
-      onDone(messageId, content, thoughtProcess) {
+      onDone(messageId, content, thoughtProcess, metrics, aborted) {
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id
-            ? { ...m, id: messageId, content, thought_process: thoughtProcess, isStreaming: false }
+            ? { ...m, id: messageId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
             : m
         ));
         setIsStreaming(false);
+        setAbortController(null);
         if (activeConvId) loadMessages(activeConvId);
         if (currentAssistantId) loadConversations(currentAssistantId);
       },
@@ -228,12 +250,14 @@ export default function App() {
             : m
         ));
         setIsStreaming(false);
+        setAbortController(null);
       },
     });
+    setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, messages.length]);
 
   // ===== 重新生成 =====
-  const handleRegenerate = useCallback(async (messageId: string) => {
+  const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default') => {
     if (!currentAssistantId || !currentConversationId || isStreaming) return;
 
     const activeConvId = currentConversationId;
@@ -245,7 +269,7 @@ export default function App() {
 
     let fullRawContent = '';
 
-    regenerateSSE(currentAssistantId, activeConvId, messageId, {
+    const regenController = regenerateSSE(currentAssistantId, activeConvId, messageId, thinkingMode, {
       onToken(token) {
         fullRawContent += token;
         setMessages(prev => prev.map(m =>
@@ -257,13 +281,14 @@ export default function App() {
           m.id === messageId ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
         ));
       },
-      onDone(newMsgId, content, thoughtProcess) {
+      onDone(newMsgId, content, thoughtProcess, metrics, aborted) {
         setMessages(prev => prev.map(m =>
           m.id === messageId
-            ? { ...m, id: newMsgId, content, thought_process: thoughtProcess, isStreaming: false }
+            ? { ...m, id: newMsgId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
             : m
         ));
         setIsStreaming(false);
+        setAbortController(null);
         loadMessages(activeConvId);
       },
       onError(error) {
@@ -273,9 +298,28 @@ export default function App() {
             : m
         ));
         setIsStreaming(false);
+        setAbortController(null);
       },
     });
+    setAbortController(regenController);
   }, [currentAssistantId, currentConversationId, isStreaming]);
+
+  // ===== 停止生成 =====
+  const handleStopGeneration = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+  }, [abortController]);
+
+  // ===== 深度思考模式切换 =====
+  const handleThinkingModeChange = useCallback(async (mode: string) => {
+    if (!currentAssistantId) return;
+    try {
+      const updated = await assistantsApi.update(currentAssistantId, { thinking_mode: mode });
+      setAssistants(prev => prev.map(a => a.id === updated.id ? updated : a));
+    } catch (e) { console.error(e); }
+  }, [currentAssistantId]);
 
   const currentAssistant = assistants.find(a => a.id === currentAssistantId) || null;
 
@@ -307,7 +351,9 @@ export default function App() {
             messages={messages}
             onSendMessage={handleSendMessage}
             isStreaming={isStreaming}
+            onStopGeneration={handleStopGeneration}
             onEditAssistant={handleEditAssistant}
+            onThinkingModeChange={handleThinkingModeChange}
             onRegenerate={handleRegenerate}
             providers={providers}
             models={models}

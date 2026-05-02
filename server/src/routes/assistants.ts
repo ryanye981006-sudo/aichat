@@ -27,7 +27,7 @@ router.post('/', (req, res) => {
   const {
     name, system_prompt, emoji,
     model_id, provider_id, temperature, temperature_enabled,
-    context_rounds, enable_memory, knowledge_base_ids
+    context_rounds, enable_memory, knowledge_base_ids, thinking_mode
   } = req.body;
 
   if (!name) {
@@ -35,8 +35,8 @@ router.post('/', (req, res) => {
   }
 
   const id = uuidv4();
-  db.prepare(`INSERT INTO assistants (id, name, system_prompt, emoji, model_id, provider_id, temperature, temperature_enabled, context_rounds, enable_memory, knowledge_base_ids)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  db.prepare(`INSERT INTO assistants (id, name, system_prompt, emoji, model_id, provider_id, temperature, temperature_enabled, context_rounds, enable_memory, knowledge_base_ids, thinking_mode)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     name,
     system_prompt || '',
@@ -47,7 +47,8 @@ router.post('/', (req, res) => {
     temperature_enabled ? 1 : 0,
     context_rounds ?? 10,
     enable_memory ? 1 : 0,
-    JSON.stringify(knowledge_base_ids || [])
+    JSON.stringify(knowledge_base_ids || []),
+    thinking_mode || 'default'
   );
 
   const assistant = db.prepare('SELECT * FROM assistants WHERE id = ?').get(id);
@@ -65,7 +66,7 @@ router.put('/:id', (req, res) => {
   const fields = [
     'name', 'system_prompt', 'emoji',
     'model_id', 'provider_id', 'temperature', 'temperature_enabled',
-    'context_rounds', 'enable_memory'
+    'context_rounds', 'enable_memory', 'thinking_mode'
   ];
   const updates: string[] = [];
   const values: any[] = [];

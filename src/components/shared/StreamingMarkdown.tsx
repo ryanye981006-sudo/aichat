@@ -12,7 +12,6 @@ export default function StreamingMarkdown({ content, isStreaming, className }: S
   return (
     <div className={cn(
       'prose prose-sm md:prose-base max-w-none',
-      isStreaming && 'streaming-cursor',
       className
     )}>
       <style>{`
@@ -66,12 +65,6 @@ export default function StreamingMarkdown({ content, isStreaming, className }: S
         .prose th {
           background: var(--color-background-soft);
           font-weight: 600;
-        }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-        .streaming-cursor::after {
-          content: '▍';
-          animation: blink 1s step-end infinite;
-          color: var(--color-primary);
         }
       `}</style>
       <ReactMarkdown remarkPlugins={[remarkGfm]}>

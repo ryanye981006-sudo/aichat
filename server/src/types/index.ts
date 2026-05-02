@@ -31,6 +31,7 @@ export interface Assistant {
   context_rounds: number;
   enable_memory: number;
   knowledge_base_ids: string;
+  thinking_mode: string;
   created_at: string;
   updated_at: string;
 }

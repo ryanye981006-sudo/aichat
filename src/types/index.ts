@@ -12,6 +12,7 @@ export interface Assistant {
   context_rounds: number;
   enable_memory: number;
   knowledge_base_ids: string;
+  thinking_mode: string;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +46,14 @@ export interface Conversation {
   updated_at: string;
 }
 
+export interface MessageMetrics {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  ttftMs: number;
+  tokensPerSecond: number;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
@@ -52,6 +61,8 @@ export interface Message {
   content: string;
   raw_content: string;
   thought_process: string | null;
+  metrics?: MessageMetrics | null;
+  aborted?: boolean;
   created_at: string;
   isStreaming?: boolean;
 }

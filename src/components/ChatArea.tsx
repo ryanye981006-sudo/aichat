@@ -1,7 +1,8 @@
 import { FormEvent, useState, useRef, useEffect, useCallback } from 'react';
 import type { Assistant, Message, Provider, Model } from '../types';
 import { cn } from '../lib/utils';
-import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check } from 'lucide-react';
+import { isReasoningModel } from '../lib/reasoning';
+import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle } from 'lucide-react';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
 import EmojiIcon from './shared/EmojiIcon';
@@ -9,12 +10,14 @@ import EmojiIcon from './shared/EmojiIcon';
 interface ChatAreaProps {
   assistant: Assistant | null;
   messages: Message[];
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, thinkingMode: string) => void;
   isStreaming: boolean;
   onEditAssistant: (assistant: Assistant) => void;
+  onThinkingModeChange?: (mode: string) => void;
   providers: Provider[];
   models: Model[];
-  onRegenerate: (messageId: string) => void;
+  onStopGeneration?: () => void;
+  onRegenerate: (messageId: string, thinkingMode: string) => void;
 }
 
 /** 格式化时间: YYYY-MM-DD HH:mm:ss */
@@ -30,21 +33,44 @@ function formatTime(iso: string): string {
 }
 
 export default function ChatArea({
-  assistant, messages, onSendMessage, isStreaming, onEditAssistant,
+  assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
   providers, models, onRegenerate,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [thinkingMode, setThinkingMode] = useState<string>(assistant?.thinking_mode || 'default');
+  const [showThinkDropdown, setShowThinkDropdown] = useState(false);
+  const thinkDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
+  // 同步 assistant 的 thinking_mode 变化
+  useEffect(() => {
+    if (assistant?.thinking_mode) {
+      setThinkingMode(assistant.thinking_mode);
+    }
+  }, [assistant?.thinking_mode]);
+
+  // 点击外部关闭深度思考下拉
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (thinkDropdownRef.current && !thinkDropdownRef.current.contains(e.target as Node)) {
+        setShowThinkDropdown(false);
+      }
+    };
+    if (showThinkDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showThinkDropdown]);
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
-    onSendMessage(input.trim());
+    onSendMessage(input.trim(), thinkingMode);
     setInput('');
   };
 
@@ -61,6 +87,23 @@ export default function ChatArea({
   const assistantLabel = model
     ? `${model.display_name || model.name} | ${provider?.name || ''}`
     : assistant?.name || '助手';
+
+  // 深度思考按钮显示与选项
+  const currentModel = model;
+  const showThinkButton = isReasoningModel(currentModel);
+
+  const thinkOptions = [
+    { value: 'default', label: '默认' },
+    { value: 'enabled', label: '开启' },
+    { value: 'disabled', label: '关闭' },
+  ];
+  const currentThinkLabel = thinkOptions.find(o => o.value === thinkingMode)?.label || '默认';
+
+  const handleThinkModeSelect = (mode: string) => {
+    setThinkingMode(mode);
+    setShowThinkDropdown(false);
+    onThinkingModeChange?.(mode);
+  };
 
   // 计算当前使用的上下文轮数
   const nonSystemMessages = messages.filter(m => m.role !== 'system');
@@ -127,8 +170,12 @@ export default function ChatArea({
             <div className="whitespace-pre-wrap line-clamp-3">{assistant.system_prompt || '点击设置提示词...'}</div>
           </div>
 
-          {messages.filter(m => m.role !== 'system').map((message) => {
+          {(() => {
+            const nonSystemMessages = messages.filter(m => m.role !== 'system');
+            const lastAiMsg = [...nonSystemMessages].reverse().find(m => m.role === 'assistant');
+            return nonSystemMessages.map((message) => {
             const isUser = message.role === 'user';
+            const isLatestAi = !isUser && message.id === lastAiMsg?.id;
             const time = message.created_at ? formatTime(message.created_at) : '';
 
             return (
@@ -169,9 +216,26 @@ export default function ChatArea({
                     }}>
                       {isUser ? (
                         <div className="whitespace-pre-wrap text-sm">{message.content}</div>
+                      ) : message.aborted ? (
+                        <div className="flex items-center gap-2 text-sm" style={{ color: '#dc2626' }}>
+                          <AlertTriangle className="w-4 h-4 shrink-0" />
+                          <span>请求被中止，可能由于超时、用户取消或服务器端主动中断导致。</span>
+                        </div>
                       ) : (
                         <StreamingMarkdown content={message.content} isStreaming={message.isStreaming} />
                       )}
+                    </div>
+                  )}
+                  {/* Token 用量 — 在气泡框外右下角，仅 AI 消息且生成完毕后显示 */}
+                  {!isUser && !message.isStreaming && message.metrics && message.metrics.totalTokens > 0 && (
+                    <div className="flex justify-end">
+                      <span
+                        className="text-[11px] cursor-help px-1"
+                        style={{ color: 'var(--color-text-3)' }}
+                        title={`首字时延 ${message.metrics.ttftMs} ms | 每秒 ${message.metrics.tokensPerSecond} tokens`}
+                      >
+                        Tokens: {message.metrics.totalTokens} ↑ {message.metrics.promptTokens} ↓ {message.metrics.completionTokens}
+                      </span>
                     </div>
                   )}
                   {message.isStreaming && !message.content && (
@@ -187,17 +251,18 @@ export default function ChatArea({
                     </div>
                   )}
 
-                  {/* 时间戳和操作按钮 */}
-                  {time && (
+                  {/* 时间戳和操作按钮 —— 仅在消息生成完毕后显示 */}
+                  {!message.isStreaming && time && (
                     <div className="flex items-center gap-2">
                       <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>{time}</span>
                       {!isUser && (
                         <div className="flex items-center gap-0.5">
                           <button
-                            onClick={() => onRegenerate(message.id)}
-                            className="p-1 rounded transition-colors hover:bg-black/5"
+                            onClick={() => isLatestAi && onRegenerate(message.id, thinkingMode)}
+                            disabled={!isLatestAi}
+                            className="p-1 rounded transition-colors hover:bg-black/5 disabled:opacity-30 disabled:cursor-not-allowed"
                             style={{ color: 'var(--color-text-3)' }}
-                            title="重新生成"
+                            title={isLatestAi ? '重新生成' : '仅最新回复可重新生成'}
                           >
                             <RefreshCw className="w-3 h-3" />
                           </button>
@@ -216,7 +281,9 @@ export default function ChatArea({
                 </div>
               </div>
             );
-          })}
+          }
+        );
+      })()}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -244,11 +311,49 @@ export default function ChatArea({
             />
             <div className="flex items-center justify-between px-3 pb-3">
               <div className="flex items-center gap-1.5">
-                {/* 上下文轮数显示 */}
-                <div className="flex items-center px-2.5 py-1.5 rounded-full text-xs"
-                  style={{ color: usedRounds >= maxRounds ? 'var(--color-primary)' : 'var(--color-text-3)' }}>
-                  {usedRounds}/{maxRounds}
-                </div>
+                {/* 深度思考按钮 */}
+                {showThinkButton && (
+                  <div className="relative" ref={thinkDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowThinkDropdown(!showThinkDropdown)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors border"
+                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}
+                    >
+                      <BrainCircuit className="w-3 h-3" />
+                      {currentThinkLabel}
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    {showThinkDropdown && (
+                      <div className="absolute bottom-full left-0 mb-1.5 rounded-xl border shadow-lg py-1 z-50 min-w-[200px]"
+                        style={{
+                          backgroundColor: 'var(--color-background)',
+                          borderColor: 'var(--color-border)',
+                        }}>
+                        {thinkOptions.map(option => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => handleThinkModeSelect(option.value)}
+                            className="w-full text-left px-4 py-2.5 hover:bg-black/5 transition-colors"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{option.label}</div>
+                                <div className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
+                                  {option.value === 'default' ? '按模型行为默认' : option.value === 'enabled' ? '强制开启深度思考' : '强制关闭深度思考'}
+                                </div>
+                              </div>
+                              {thinkingMode === option.value && (
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
+                              )}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <button type="button" className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors border"
                   style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>
                   <Book className="w-3 h-3" />
@@ -256,22 +361,39 @@ export default function ChatArea({
                 </button>
               </div>
               <div className="flex gap-1.5 items-center">
+                {/* 上下文轮数显示 */}
+                <div className="flex items-center px-2.5 py-1.5 rounded-full text-xs"
+                  style={{ color: usedRounds >= maxRounds ? 'var(--color-primary)' : 'var(--color-text-3)' }}>
+                  {usedRounds}/{maxRounds}
+                </div>
                 <button type="button" className="p-2 rounded-full transition-colors hover:bg-black/5"
                   style={{ color: 'var(--color-icon)' }}>
                   <Paperclip className="w-4 h-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!input.trim() || isStreaming}
-                  className={cn(
-                    "p-2 rounded-full transition-colors flex items-center justify-center text-white w-8 h-8",
-                    input.trim() && !isStreaming ? "opacity-100 hover:opacity-80" : "opacity-30 cursor-not-allowed"
-                  )}
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  <Send className="w-3.5 h-3.5 ml-[-1px]" />
-                </button>
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={onStopGeneration}
+                    className="p-2 rounded-full transition-colors flex items-center justify-center text-white w-8 h-8 hover:opacity-80"
+                    style={{ backgroundColor: '#dc2626' }}
+                    title="停止生成"
+                  >
+                    <Square className="w-3.5 h-3.5" fill="white" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!input.trim()}
+                    className={cn(
+                      "p-2 rounded-full transition-colors flex items-center justify-center text-white w-8 h-8",
+                      input.trim() ? "opacity-100 hover:opacity-80" : "opacity-30 cursor-not-allowed"
+                    )}
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <Send className="w-3.5 h-3.5 ml-[-1px]" />
+                  </button>
+                )}
               </div>
             </div>
           </div>

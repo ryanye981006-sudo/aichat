@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 const router = Router();
 
 router.post('/completions', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message } = req.body;
+  const { assistant_id, conversation_id, message, thinking_mode } = req.body;
 
   if (!assistant_id || !message) {
     res.status(400).json({ error: 'assistant_id 和 message 不能为空' });
@@ -87,6 +87,16 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
   }
 
+  // 深度思考模式控制
+  const thinkingMode = thinking_mode || 'default';
+  const THINK_ENABLED_INSTRUCTION = '\n\n## 思考要求\n请在回答每个问题时，使用以下格式进行深度思考：\n<think>\n详细的分步推理过程...\n</think>\n\n最终答案。';
+  const THINK_DISABLED_INSTRUCTION = '\n\n## 思考要求\n请直接给出答案，不要输出任何思考过程或推理步骤，不要使用 <think> 标签。';
+  if (thinkingMode === 'enabled') {
+    systemContent += THINK_ENABLED_INSTRUCTION;
+  } else if (thinkingMode === 'disabled') {
+    systemContent += THINK_DISABLED_INSTRUCTION;
+  }
+
   // 设置 SSE 响应头
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -98,6 +108,14 @@ router.post('/completions', async (req: Request, res: Response) => {
   const sendSSE = (data: Record<string, unknown>) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
+
+  // 客户端断开连接时中止 LLM 调用
+  const abortController = new AbortController();
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
 
   // 发送对话 ID
   sendSSE({ type: 'meta', conversation_id: activeConvId });
@@ -114,7 +132,7 @@ router.post('/completions', async (req: Request, res: Response) => {
 
   let fullRawContent = '';
 
-  // 调用 LLM 流式
+  // 调用 LLM 流式（传入 abortSignal 以支持中止）
   await aiService.chatStream(
     chatMessages,
     assistant.model_id,
@@ -137,7 +155,7 @@ router.post('/completions', async (req: Request, res: Response) => {
           });
         }
       },
-      onComplete(fullText: string) {
+      onComplete(fullText: string, metrics) {
         // 解析最终内容
         const thinkMatch = fullText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
         let parsedContent = fullText;
@@ -148,11 +166,17 @@ router.post('/completions', async (req: Request, res: Response) => {
           parsedContent = fullText.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
         }
 
-        // 保存助手消息到 DB
+        // 保存助手消息到 DB（含性能指标）
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(aiMsgId, activeConvId, 'assistant', parsedContent, fullText, thoughtProcess);
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          aiMsgId, activeConvId, 'assistant', parsedContent, fullText, thoughtProcess,
+          metrics?.promptTokens ?? null,
+          metrics?.completionTokens ?? null,
+          metrics?.ttftMs ?? null,
+          metrics?.tokensPerSecond ?? null,
+        );
 
         // 更新对话时间
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
@@ -163,6 +187,7 @@ router.post('/completions', async (req: Request, res: Response) => {
           message_id: aiMsgId,
           content: parsedContent,
           thoughtProcess,
+          metrics: metrics || null,
         });
 
         res.end();
@@ -182,13 +207,32 @@ router.post('/completions', async (req: Request, res: Response) => {
         sendSSE({ type: 'error', message: error.message });
         res.end();
       },
-    }
+    },
+    abortController.signal,
   );
+
+  // 如果被中止，保存已有内容并通知前端
+  if (abortController.signal.aborted && fullRawContent) {
+    const thinkMatch = fullRawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+    let parsedContent = fullRawContent;
+    let thoughtProcess: string | null = null;
+    if (thinkMatch) {
+      thoughtProcess = thinkMatch[1].trim();
+      parsedContent = fullRawContent.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+    }
+    const aiMsgId = uuidv4();
+    db.prepare(
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, fullRawContent, thoughtProcess);
+    db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
+    sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
+  }
+  res.end();
 });
 
 // 重新生成 —— 删除指定助手消息后重新调用 LLM
 router.post('/regenerate', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message_id } = req.body;
+  const { assistant_id, conversation_id, message_id, thinking_mode } = req.body;
 
   if (!assistant_id || !conversation_id || !message_id) {
     res.status(400).json({ error: 'assistant_id、conversation_id 和 message_id 不能为空' });
@@ -250,6 +294,14 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
   }
 
+  // 深度思考模式控制
+  const regenThinkingMode = thinking_mode || 'default';
+  if (regenThinkingMode === 'enabled') {
+    systemContent += '\n\n## 思考要求\n请在回答每个问题时，使用以下格式进行深度思考：\n<think>\n详细的分步推理过程...\n</think>\n\n最终答案。';
+  } else if (regenThinkingMode === 'disabled') {
+    systemContent += '\n\n## 思考要求\n请直接给出答案，不要输出任何思考过程或推理步骤，不要使用 <think> 标签。';
+  }
+
   // 上下文轮数截断
   const rounds = assistant.context_rounds ?? 10;
   let historySlice = historyMessages;
@@ -270,6 +322,14 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   const sendSSE = (data: Record<string, unknown>) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
+
+  // 客户端断开连接时中止 LLM 调用
+  const abortController = new AbortController();
+  req.on('close', () => {
+    if (!res.writableEnded) {
+      abortController.abort();
+    }
+  });
 
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
@@ -299,7 +359,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           sendSSE({ type: 'parsed', thoughtProcess, displayContent });
         }
       },
-      onComplete(fullText: string) {
+      onComplete(fullText: string, metrics) {
         const thinkMatch = fullText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
         let parsedContent = fullText;
         let thoughtProcess: string | null = null;
@@ -310,8 +370,14 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(aiMsgId, conversation_id, 'assistant', parsedContent, fullText, thoughtProcess);
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(
+          aiMsgId, conversation_id, 'assistant', parsedContent, fullText, thoughtProcess,
+          metrics?.promptTokens ?? null,
+          metrics?.completionTokens ?? null,
+          metrics?.ttftMs ?? null,
+          metrics?.tokensPerSecond ?? null,
+        );
 
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
 
@@ -320,6 +386,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           message_id: aiMsgId,
           content: parsedContent,
           thoughtProcess,
+          metrics: metrics || null,
         });
 
         res.end();
@@ -337,8 +404,27 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         sendSSE({ type: 'error', message: error.message });
         res.end();
       },
-    }
+    },
+    abortController.signal,
   );
+
+  // 如果被中止，保存已有内容并通知前端
+  if (abortController.signal.aborted && fullRawContent) {
+    const thinkMatch = fullRawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+    let parsedContent = fullRawContent;
+    let thoughtProcess: string | null = null;
+    if (thinkMatch) {
+      thoughtProcess = thinkMatch[1].trim();
+      parsedContent = fullRawContent.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+    }
+    const aiMsgId = uuidv4();
+    db.prepare(
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, fullRawContent, thoughtProcess);
+    db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
+    sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
+  }
+  res.end();
 });
 
 export default router;
