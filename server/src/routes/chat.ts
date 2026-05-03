@@ -8,6 +8,13 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
+// Qwen 模型检测：用于 /no_think 后缀控制
+function isQwenModel(modelName: string): boolean {
+  if (!modelName) return false;
+  const name = modelName.toLowerCase();
+  return name.includes('qwen') || name.includes('qwq') || name.includes('qvq');
+}
+
 router.post('/completions', async (req: Request, res: Response) => {
   const { assistant_id, conversation_id, message, thinking_mode } = req.body;
 
@@ -29,6 +36,9 @@ router.post('/completions', async (req: Request, res: Response) => {
     res.status(400).json({ error: '助手未配置模型，请先在设置中为助手选择模型' });
     return;
   }
+
+  // 加载模型名称（用于 Qwen /no_think 后缀检测等）
+  const modelName = (db.prepare('SELECT name FROM models WHERE id = ?').get(assistant.model_id) as any)?.name || '';
 
   // 确保对话存在
   let activeConvId = conversation_id;
@@ -136,6 +146,14 @@ router.post('/completions', async (req: Request, res: Response) => {
         content: m.raw_content || m.content,
       })),
   ];
+
+  // Qwen 模型关闭思考时，在最后一条用户消息末尾追加 /no_think（兜底控制）
+  if (thinkingMode === 'disabled' && isQwenModel(modelName)) {
+    const lastUser = [...chatMessages].reverse().find(m => m.role === 'user');
+    if (lastUser) {
+      lastUser.content = lastUser.content + ' /no_think';
+    }
+  }
 
   let fullRawContent = '';
 
@@ -269,6 +287,9 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     return;
   }
 
+  // 加载模型名称（用于 Qwen /no_think 后缀检测等）
+  const modelName = (db.prepare('SELECT name FROM models WHERE id = ?').get(assistant.model_id) as any)?.name || '';
+
   // 验证消息存在且为助手消息
   const targetMsg = db.prepare('SELECT * FROM messages WHERE id = ? AND conversation_id = ? AND role = ?').get(message_id, conversation_id, 'assistant') as any;
   if (!targetMsg) {
@@ -361,6 +382,14 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         content: m.raw_content || m.content,
       })),
   ];
+
+  // Qwen 模型关闭思考时，在最后一条用户消息末尾追加 /no_think（兜底控制）
+  if (regenThinkingMode === 'disabled' && isQwenModel(modelName)) {
+    const lastUser = [...chatMessages].reverse().find(m => m.role === 'user');
+    if (lastUser) {
+      lastUser.content = lastUser.content + ' /no_think';
+    }
+  }
 
   let fullRawContent = '';
 

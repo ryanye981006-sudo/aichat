@@ -112,11 +112,24 @@ export class AiSdkService {
 
       const sdkModel = createModel(provider, model)
 
-      // 构建 providerOptions：传递思考控制参数
+      // 构建 providerOptions：传递思考控制参数（多格式同时发送，厂商按需取用）
       const providerOptions: Record<string, any> = {}
-      if (thinkingMode === 'disabled' || thinkingMode === 'enabled') {
+      if (thinkingMode === 'disabled') {
         providerOptions.openaiCompatible = {
-          enable_thinking: thinkingMode === 'enabled',
+          // AI SDK 识别的标准字段，映射为 reasoning_effort 请求参数
+          reasoningEffort: 'none' as const,
+          // DashScope / SiliconFlow
+          enable_thinking: false,
+          // DeepSeek / Anthropic 协议 / 豆包等
+          thinking: { type: 'disabled' as const },
+          // Nvidia NIM
+          chat_template_kwargs: { enable_thinking: false },
+        }
+      } else if (thinkingMode === 'enabled') {
+        providerOptions.openaiCompatible = {
+          enable_thinking: true,
+          thinking: { type: 'enabled' as const },
+          chat_template_kwargs: { enable_thinking: true },
         }
       }
 
