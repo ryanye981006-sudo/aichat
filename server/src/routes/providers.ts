@@ -97,15 +97,20 @@ router.delete('/:id', (req, res) => {
   if (existing.is_preset) {
     return res.status(400).json({ error: '预设提供商不可删除' });
   }
+  db.prepare('DELETE FROM models WHERE provider_id = ?').run(req.params.id);
   db.prepare('DELETE FROM providers WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
-// 测试提供商连接
+// 测试单个模型连通性（使用 AI SDK 流式，与聊天相同代码路径）
 router.post('/:id/test', async (req, res) => {
   try {
-    await aiService.testConnection(req.params.id);
-    res.json({ success: true, message: '连接成功' });
+    const { model_id } = req.body;
+    if (!model_id) {
+      return res.status(400).json({ error: 'model_id 不能为空' });
+    }
+    const result = await aiService.testModel(req.params.id, model_id);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -122,6 +127,20 @@ router.post('/:id/test-models', async (req, res) => {
       results.push({ model_id: model.id, model_name: model.name, ...r });
     }
     res.json({ results });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 验证模型名称是否在 API 上可用
+router.post('/:id/validate-model', async (req, res) => {
+  try {
+    const { model_name } = req.body;
+    if (!model_name) {
+      return res.status(400).json({ error: '模型名称不能为空' });
+    }
+    const result = await aiService.validateModel(req.params.id, model_name);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

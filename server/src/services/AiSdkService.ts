@@ -6,6 +6,17 @@ import { getDb } from '../db/connection.js'
 // 缓存 provider SDK 实例，避免每次请求重新创建连接
 const modelCache = new Map<string, any>()
 
+// 翻译常见 API 错误信息为中文
+function translateError(err: any, defaultMsg: string = '未知错误'): string {
+  const msg = err?.message || String(err) || defaultMsg
+  if (/abort|timeout/i.test(msg)) return '请求超时'
+  if (/fetch\s*failed|Failed to fetch/i.test(msg)) return '网络请求失败，请检查 API 地址是否正确'
+  if (/401|Unauthorized/i.test(msg)) return 'API 密钥无效或未配置'
+  if (/403|Forbidden/i.test(msg)) return 'API 访问被拒绝，请检查密钥权限'
+  if (/404|not\s*found|does not exist/i.test(msg)) return '模型不存在，请确认模型名称是否正确'
+  return msg
+}
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -238,25 +249,7 @@ export class AiSdkService {
     return result.text
   }
 
-  // 测试连接
-  async testConnection(providerId: string): Promise<void> {
-    const db = getDb()
-    const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
-    if (!provider) throw new Error('提供商不存在')
-
-    const baseUrl = normalizeBaseUrl(provider.base_url)
-    const response = await fetch(`${baseUrl}/models`, {
-      headers: {
-        'Authorization': `Bearer ${provider.api_key}`,
-      },
-    })
-
-    if (!response.ok) {
-      throw new Error(`连接失败 (${response.status}): ${response.statusText}`)
-    }
-  }
-
-  // 测试单个模型连通性（15s 超时）
+  // 测试单个模型连通性（使用 AI SDK 流式，与真实聊天相同代码路径）
   async testModel(providerId: string, modelId: string): Promise<{ success: boolean; time: number; error?: string }> {
     const db = getDb()
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
@@ -265,42 +258,96 @@ export class AiSdkService {
     const model = db.prepare('SELECT * FROM models WHERE id = ?').get(modelId) as any
     if (!model) throw new Error('模型不存在')
 
-    const baseUrl = normalizeBaseUrl(provider.base_url)
     const startTime = Date.now()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    let receivedFirstToken = false
 
     try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 15000)
-
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${provider.api_key}`,
-        },
-        body: JSON.stringify({
-          model: model.name,
-          messages: [{ role: 'user', content: 'hi' }],
-          max_tokens: 1,
-        }),
-        signal: controller.signal,
+      const streamResult = await _streamText({
+        model: createModel(provider, model),
+        messages: [{ role: 'user', content: 'hi' }],
+        maxOutputTokens: 10,
+        abortSignal: controller.signal,
       })
 
+      for await (const part of streamResult.fullStream) {
+        if (part.type === 'text-delta' || part.type === 'reasoning-delta') {
+          receivedFirstToken = true
+          controller.abort()
+          break
+        }
+        if (part.type === 'error') {
+          clearTimeout(timeout)
+          return { success: false, time: Date.now() - startTime, error: translateError(part.error, '未知错误') }
+        }
+      }
+
+      clearTimeout(timeout)
+      return { success: true, time: Date.now() - startTime }
+    } catch (err: any) {
       clearTimeout(timeout)
       const elapsed = Date.now() - startTime
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({} as any))
-        return { success: false, time: elapsed, error: errData.error?.message || `HTTP ${response.status}` }
-      }
-
-      return { success: true, time: elapsed }
-    } catch (err: any) {
-      const elapsed = Date.now() - startTime
       if (err.name === 'AbortError') {
+        if (receivedFirstToken) {
+          return { success: true, time: elapsed }
+        }
         return { success: false, time: elapsed, error: '请求超时 (15s)' }
       }
-      return { success: false, time: elapsed, error: err.message || '未知错误' }
+      return { success: false, time: elapsed, error: translateError(err, '未知错误') }
+    }
+  }
+
+  // 验证模型名称是否在 API 上可用（流式测试，收到首个 token 即返回）
+  async validateModel(providerId: string, modelName: string): Promise<{ valid: boolean; time: number; error?: string }> {
+    const db = getDb()
+    const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
+    if (!provider) throw new Error('提供商不存在')
+
+    // 检查是否已存在同名模型
+    const existing = db.prepare('SELECT id FROM models WHERE provider_id = ? AND name = ?')
+      .get(providerId, modelName) as any
+    if (existing) {
+      return { valid: false, time: 0, error: '该模型已存在于此供应商下' }
+    }
+
+    const startTime = Date.now()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    let receivedFirstToken = false
+
+    try {
+      const sdkModel = createModel(provider, { name: modelName })
+      const streamResult = await _streamText({
+        model: sdkModel,
+        messages: [{ role: 'user', content: 'hi' }],
+        maxOutputTokens: 10,
+        abortSignal: controller.signal,
+      })
+
+      for await (const part of streamResult.fullStream) {
+        if (part.type === 'text-delta' || part.type === 'reasoning-delta') {
+          receivedFirstToken = true
+          controller.abort()
+          break
+        }
+        if (part.type === 'error') {
+          clearTimeout(timeout)
+          return { valid: false, time: Date.now() - startTime, error: translateError(part.error, '验证失败') }
+        }
+      }
+
+      clearTimeout(timeout)
+      return { valid: true, time: Date.now() - startTime }
+    } catch (err: any) {
+      clearTimeout(timeout)
+      if (err.name === 'AbortError' && receivedFirstToken) {
+        return { valid: true, time: Date.now() - startTime }
+      }
+      if (err.name === 'AbortError') {
+        return { valid: false, time: Date.now() - startTime, error: '请求超时，模型未在 15 秒内响应' }
+      }
+      return { valid: false, time: Date.now() - startTime, error: translateError(err, '验证失败') }
     }
   }
 
@@ -311,18 +358,23 @@ export class AiSdkService {
     if (!provider) throw new Error('提供商不存在')
 
     const baseUrl = normalizeBaseUrl(provider.base_url)
-    const response = await fetch(`${baseUrl}/models`, {
+    const url = `${baseUrl}/models`
+    console.log(`[fetchModels] 请求: GET ${url}`)
+
+    const response = await fetch(url, {
       headers: {
         'Authorization': `Bearer ${provider.api_key}`,
       },
     })
 
     if (!response.ok) {
-      throw new Error(`拉取模型列表失败 (${response.status})`)
+      const body = await response.text().catch(() => '')
+      console.error(`[fetchModels] 失败: ${response.status} — ${body.slice(0, 300)}`)
+      throw new Error(`获取模型列表失败 (${response.status}): ${body.slice(0, 100)}`)
     }
 
     const data = await response.json() as any
-    console.log(`[fetchModels] ${provider.name} 原始响应结构:`, JSON.stringify(data).slice(0, 500))
+    console.log(`[fetchModels] 成功: ${provider.name} 获取到 ${(data.data || []).length} 个模型`)
     // 透传原始模型数据，保留 owned_by 等字段供前端展示
     return (data.data || []).map((m: any) => ({
       id: m.id,

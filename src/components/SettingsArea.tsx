@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { Provider, Model, KnowledgeBase, KnowledgeDocument, MemorySettings, MemoryEntry } from '../types';
 import { cn } from '../lib/utils';
 import { providersApi, modelsApi, knowledgeApi, memoryApi } from '../services/api';
-import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2 } from 'lucide-react';
 
 // ===== 通用 Toggle 组件 =====
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -48,14 +48,17 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const [showAddModel, setShowAddModel] = useState(false);
   const [showFetchModels, setShowFetchModels] = useState(false);
   const [showKey, setShowKey] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [fetching, setFetching] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showSingleTest, setShowSingleTest] = useState(false);
+  const [singleTestModelId, setSingleTestModelId] = useState('');
+  const [singleTesting, setSingleTesting] = useState(false);
+  const [singleTestResult, setSingleTestResult] = useState<{ success: boolean; time: number; error?: string } | null>(null);
   const [fetchError, setFetchError] = useState('');
   const [fetchedModels, setFetchedModels] = useState<any>(null);
   const [testingModels, setTestingModels] = useState(false);
   const [showTestConfirm, setShowTestConfirm] = useState(false);
   const [modelTestResults, setModelTestResults] = useState<Record<string, { status: 'success' | 'error'; time: number; error?: string }>>({});
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // ===== RAG 状态 =====
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -114,7 +117,7 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
 
   const handleAddProvider = async (name: string, type: string, baseUrl: string): Promise<void> => {
     const p = await providersApi.create({ name, type, base_url: baseUrl });
-    setProviders(prev => [...prev, p]);
+    setProviders(prev => [p, ...prev]);
     setSelectedProviderId(p.id);
     setShowAddProvider(false);
   };
@@ -126,6 +129,18 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     } catch (e) { console.error(e); }
   };
 
+  const handleDeleteProvider = async (id: string) => {
+    try {
+      await providersApi.remove(id);
+      setProviders(prev => prev.filter(x => x.id !== id));
+      setModels(prev => prev.filter(m => m.provider_id !== id));
+      if (selectedProviderId === id) {
+        setSelectedProviderId(null);
+      }
+      setConfirmDeleteId(null);
+    } catch (e) { console.error(e); }
+  };
+
   const handleAddModel = async (name: string) => {
     if (!selectedProviderId) return;
     try {
@@ -134,28 +149,35 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     } catch (e) { console.error(e); }
   };
 
-  const handleTestProvider = async () => {
-    if (!selectedProviderId) return;
-    setTesting(true);
-    setTestResult(null);
+  const handleOpenSingleTest = () => {
+    setSingleTestResult(null);
+    setSingleTestModelId(providerModels.length > 0 ? providerModels[0].id : '');
+    setShowSingleTest(true);
+  };
+
+  const handleConfirmSingleTest = async () => {
+    if (!selectedProviderId || !singleTestModelId) return;
+    setSingleTesting(true);
+    setSingleTestResult(null);
     try {
-      await providersApi.test(selectedProviderId);
-      setTestResult({ success: true, message: '连接成功' });
+      const result = await providersApi.test(selectedProviderId, singleTestModelId);
+      setSingleTestResult(result);
     } catch (e) {
-      setTestResult({ success: false, message: e instanceof Error ? e.message : '连接失败' });
+      setSingleTestResult({ success: false, time: 0, error: e instanceof Error ? e.message : '测试失败' });
     } finally {
-      setTesting(false);
+      setSingleTesting(false);
     }
   };
 
   const handleFetchModels = async () => {
     if (!selectedProviderId) return;
+    setShowFetchModels(true);
     setFetching(true);
     setFetchError('');
+    setFetchedModels(null);
     try {
       const data = await providersApi.fetchModels(selectedProviderId);
       setFetchedModels(data);
-      setShowFetchModels(true);
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : '获取模型列表失败');
     } finally {
@@ -180,18 +202,24 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     setShowTestConfirm(false);
     setTestingModels(true);
     setModelTestResults({});
-    try {
-      const { results } = await providersApi.testModels(selectedProviderId);
-      const statusMap: Record<string, { status: 'success' | 'error'; time: number; error?: string }> = {};
-      for (const r of results) {
-        statusMap[r.model_id] = { status: r.success ? 'success' : 'error', time: r.time, error: r.error };
+
+    // 并发测试所有模型，每个模型结果实时更新
+    await Promise.allSettled(providerModels.map(async (m) => {
+      try {
+        const result = await providersApi.test(selectedProviderId, m.id);
+        setModelTestResults(prev => ({
+          ...prev,
+          [m.id]: { status: result.success ? 'success' : 'error', time: result.time, error: result.error },
+        }));
+      } catch (e) {
+        setModelTestResults(prev => ({
+          ...prev,
+          [m.id]: { status: 'error', time: 0, error: e instanceof Error ? e.message : '测试失败' },
+        }));
       }
-      setModelTestResults(statusMap);
-    } catch (e) {
-      console.error('模型测试失败:', e);
-    } finally {
-      setTestingModels(false);
-    }
+    }));
+
+    setTestingModels(false);
   };
 
   const handleCreateKb = async (name: string) => {
@@ -282,6 +310,12 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                 <div className="flex items-center gap-2 mb-6 pb-4 border-b" style={{ borderColor }}>
                   <h2 className="text-lg font-bold" style={{ color: textColor }}>{selectedProvider.name}</h2>
                   <div className="flex-1" />
+                  {!selectedProvider.is_preset && (
+                    <button onClick={() => setConfirmDeleteId(selectedProvider.id)}
+                      className="p-1 rounded transition-colors hover:opacity-70" title="删除供应商">
+                      <Trash2 className="w-4 h-4" style={{ color: '#ef4444' }} />
+                    </button>
+                  )}
                   <Toggle
                     checked={!!selectedProvider.enabled}
                     onChange={() => handleUpdateProvider(selectedProvider.id, { enabled: selectedProvider.enabled ? 0 : 1 })}
@@ -307,17 +341,12 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                           {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
-                      <button onClick={handleTestProvider} disabled={testing}
-                        className="px-4 border-l text-sm font-medium transition-colors hover:opacity-80 disabled:opacity-50"
-                        style={{ borderColor, color: testResult ? (testResult.success ? '#22c55e' : '#ef4444') : textSecondary }}>
-                        {testing ? '测试中...' : testResult ? (testResult.success ? '✓ 成功' : '✗ 失败') : '测试'}
+                      <button onClick={handleOpenSingleTest}
+                        className="px-4 border-l text-sm font-medium transition-colors hover:opacity-80"
+                        style={{ borderColor, color: textSecondary }}>
+                        测试
                       </button>
                     </div>
-                    {testResult && (
-                      <p className="text-xs mt-1" style={{ color: testResult.success ? '#22c55e' : '#ef4444' }}>
-                        {testResult.message}
-                      </p>
-                    )}
                   </div>
 
                   {/* Base URL */}
@@ -617,19 +646,22 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
         />
       )}
 
-      {showAddModel && (
+      {showAddModel && selectedProviderId && (
         <AddModelModal
           onClose={() => setShowAddModel(false)}
           onSave={handleAddModel}
+          onValidate={(modelName: string) => providersApi.validateModel(selectedProviderId, modelName)}
         />
       )}
 
-      {showFetchModels && selectedProvider && fetchedModels && (
+      {showFetchModels && selectedProvider && (
         <FetchModelsModal
           providerName={selectedProvider.name}
           models={fetchedModels}
           existingModelNames={providerModels.map(m => m.name)}
-          onClose={() => { setShowFetchModels(false); setFetchedModels(null); }}
+          loading={fetching}
+          error={fetchError}
+          onClose={() => { setShowFetchModels(false); setFetchedModels(null); setFetchError(''); }}
           onAddModel={handleAddModel}
           onAddSelected={async (names: string[]) => {
             for (const name of names) {
@@ -680,6 +712,106 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
               <button onClick={handleConfirmTestModels}
                 className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
                 style={{ backgroundColor: '#12C175' }}>开始</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 单个模型测试弹窗 */}
+      {showSingleTest && selectedProvider && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-md overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>模型连通性测试</h3>
+              <button onClick={() => setShowSingleTest(false)} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              {providerModels.length > 0 ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>选择模型</label>
+                    <select value={singleTestModelId} onChange={e => setSingleTestModelId(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+                      style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                      {providerModels.map(m => (
+                        <option key={m.id} value={m.id}>{m.display_name || m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="p-3 rounded-lg border" style={{ backgroundColor: '#fef3c7', borderColor: '#f59e0b' }}>
+                    <p className="text-sm font-medium" style={{ color: '#92400e' }}>测试需要发送真实请求，请谨慎使用。</p>
+                    <p className="text-sm mt-1" style={{ color: '#a16207' }}>按次收费的模型可能产生费用，请自行承担。</p>
+                  </div>
+                  {singleTestResult && (
+                    <div className="p-3 rounded-lg border" style={{
+                      backgroundColor: singleTestResult.success ? '#f0fdf4' : '#fef2f2',
+                      borderColor: singleTestResult.success ? '#86efac' : '#fecaca',
+                    }}>
+                      {singleTestResult.success ? (
+                        <div className="flex items-center gap-2">
+                          <CheckCircle className="w-5 h-5" style={{ color: '#22c55e' }} />
+                          <span className="text-sm font-medium" style={{ color: '#16a34a' }}>
+                            连接成功 ({singleTestResult.time}ms)
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          <XCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: '#ef4444' }} />
+                          <div>
+                            <span className="text-sm font-medium" style={{ color: '#dc2626' }}>连接失败</span>
+                            {singleTestResult.error && (
+                              <p className="text-xs mt-1" style={{ color: '#b91c1c' }}>{singleTestResult.error}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="py-8 text-center">
+                  <p className="text-sm font-medium mb-1" style={{ color: 'var(--color-text-2)' }}>暂无模型</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-3)' }}>请先通过"获取模型列表"或"+"按钮添加模型</p>
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => setShowSingleTest(false)} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+              {providerModels.length > 0 && (
+                <button onClick={handleConfirmSingleTest} disabled={singleTesting || !singleTestModelId}
+                  className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: '#12C175' }}>
+                  {singleTesting ? '测试中...' : '开始'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 删除供应商确认弹窗 */}
+      {confirmDeleteId && selectedProvider && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>删除供应商</h3>
+              <button onClick={() => setConfirmDeleteId(null)} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5">
+              <p className="text-sm" style={{ color: 'var(--color-text-2)' }}>
+                确认删除供应商 <span style={{ color: 'var(--color-text)', fontWeight: 600 }}>{selectedProvider.name}</span>？
+              </p>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-3)' }}>
+                该供应商下的所有模型也将被删除，此操作不可撤销。
+              </p>
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => setConfirmDeleteId(null)} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+              <button onClick={() => handleDeleteProvider(confirmDeleteId)}
+                className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: '#ef4444' }}>确认删除</button>
             </div>
           </div>
         </div>
@@ -754,8 +886,33 @@ function AddProviderModal({ onClose, onSave }: { onClose: () => void; onSave: (n
 }
 
 // ===== Add Model Modal =====
-function AddModelModal({ onClose, onSave }: { onClose: () => void; onSave: (name: string) => void }) {
+function AddModelModal({ onClose, onSave, onValidate }: {
+  onClose: () => void;
+  onSave: (name: string) => void;
+  onValidate: (name: string) => Promise<{ valid: boolean; time?: number; error?: string }>;
+}) {
   const [name, setName] = useState('');
+  const [validating, setValidating] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleConfirm = async () => {
+    if (!name.trim()) return;
+    setValidating(true);
+    setError('');
+    try {
+      const result = await onValidate(name.trim());
+      if (result.valid) {
+        onSave(name.trim());
+      } else {
+        setError(result.error || '模型验证失败，请确认模型名称是否正确');
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '验证请求失败');
+    } finally {
+      setValidating(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
       <div className="rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
@@ -765,17 +922,23 @@ function AddModelModal({ onClose, onSave }: { onClose: () => void; onSave: (name
         </div>
         <div className="p-5">
           <label className="block text-sm mb-1.5" style={{ color: 'var(--color-text-2)' }}>模型标识 (Model ID)</label>
-          <input value={name} onChange={e => setName(e.target.value)} autoFocus
+          <input value={name} onChange={e => { setName(e.target.value); setError(''); }} autoFocus
             className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
             style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            placeholder="例如 gpt-4o" />
+            placeholder="例如 gpt-4o"
+            onKeyDown={e => { if (e.key === 'Enter') handleConfirm(); }} />
+          {error && (
+            <p className="text-xs mt-2" style={{ color: '#ef4444' }}>{error}</p>
+          )}
         </div>
         <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm border transition-colors"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
-          <button onClick={() => { if (name.trim()) onSave(name.trim()); }}
-            className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-primary)' }}>确定</button>
+          <button onClick={handleConfirm} disabled={validating || !name.trim()}
+            className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-primary)' }}>
+            {validating ? '验证中...' : '确定'}
+          </button>
         </div>
       </div>
     </div>
@@ -787,6 +950,8 @@ function FetchModelsModal({
   providerName,
   models,
   existingModelNames,
+  loading,
+  error,
   onClose,
   onAddModel,
   onAddSelected,
@@ -794,6 +959,8 @@ function FetchModelsModal({
   providerName: string;
   models: any;
   existingModelNames: string[];
+  loading: boolean;
+  error: string;
   onClose: () => void;
   onAddModel: (name: string) => void;
   onAddSelected: (names: string[]) => void;
@@ -815,7 +982,7 @@ function FetchModelsModal({
 
   // Parse models into groups
   const groups: Record<string, any[]> = {};
-  if (models.data) {
+  if (models?.data) {
     for (const model of models.data) {
       const group = extractGroup(model.id || model.name || '');
       if (!groups[group]) groups[group] = [];
@@ -823,7 +990,7 @@ function FetchModelsModal({
     }
   }
 
-  const allModels = models.data || [];
+  const allModels = models?.data || [];
   // 按模型数量降序排列分组
   const categories = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
 
@@ -935,11 +1102,21 @@ function FetchModelsModal({
 
         {/* Model List */}
         <div className="flex-1 overflow-y-auto px-5 py-3">
-          {Object.entries(filteredGroups).length === 0 ? (
+          {loading ? (
+            <div className="py-16 flex flex-col items-center justify-center gap-3">
+              <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
+              <span className="text-sm" style={{ color: 'var(--color-text-3)' }}>正在获取模型列表...</span>
+            </div>
+          ) : error ? (
+            <div className="py-10 text-center">
+              <p className="text-sm font-medium mb-1" style={{ color: '#ef4444' }}>获取失败</p>
+              <p className="text-xs" style={{ color: 'var(--color-text-3)' }}>{error}</p>
+            </div>
+          ) : models && Object.entries(filteredGroups).length === 0 ? (
             <div className="py-10 text-center text-sm" style={{ color: 'var(--color-text-3)' }}>
               未找到匹配的模型
             </div>
-          ) : (
+          ) : models ? (
             Object.entries(filteredGroups).map(([category, catModels]) => (
               <div key={category} className="mb-3">
                 <div className="flex items-center gap-2 mb-1.5">
@@ -993,7 +1170,7 @@ function FetchModelsModal({
                 </div>
               </div>
             ))
-          )}
+          ) : null}
         </div>
 
         {/* Footer */}

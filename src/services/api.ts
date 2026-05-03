@@ -42,10 +42,12 @@ export const providersApi = {
   create: (data: any) => request<any>('/providers', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: string, data: any) => request<any>(`/providers/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   remove: (id: string) => request<any>(`/providers/${id}`, { method: 'DELETE' }),
-  test: (id: string) => request<any>(`/providers/${id}/test`, { method: 'POST' }),
+  test: (id: string, modelId: string) => request<any>(`/providers/${id}/test`, { method: 'POST', body: JSON.stringify({ model_id: modelId }) }),
   fetchModels: (id: string) => request<any>(`/providers/${id}/fetch-models`, { method: 'POST' }),
   testModels: (id: string) => request<any>(`/providers/${id}/test-models`, { method: 'POST' }),
   clearModels: (id: string) => request<any>(`/providers/${id}/models`, { method: 'DELETE' }),
+  validateModel: (providerId: string, modelName: string) =>
+    request<{ valid: boolean; error?: string }>(`/providers/${providerId}/validate-model`, { method: 'POST', body: JSON.stringify({ model_name: modelName }) }),
 };
 
 // ===== 模型 API =====
