@@ -3,6 +3,7 @@ import type { Assistant, Message, Provider, Model } from '../types';
 import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
 import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle } from 'lucide-react';
+import { Tooltip } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
 import EmojiIcon from './shared/EmojiIcon';
@@ -250,22 +251,7 @@ export default function ChatArea({
                       </div>
                     </div>
                   )}
-                  {/* Token 用量 — 在气泡框外右下角，仅 AI 消息且生成完毕后显示 */}
-                  {!isUser && !message.isStreaming && message.metrics && (
-                    <div className="flex justify-end">
-                      <span
-                        className="text-[11px] cursor-help px-1"
-                        style={{ color: 'var(--color-text-3)' }}
-                        title={`首字时延 ${message.metrics.ttftMs} ms | 每秒 ${message.metrics.tokensPerSecond} tokens`}
-                      >
-                        {message.metrics.totalTokens > 0
-                          ? `Tokens: ${message.metrics.totalTokens} ↑ ${message.metrics.promptTokens} ↓ ${message.metrics.completionTokens}`
-                          : `TTFT: ${message.metrics.ttftMs}ms`}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* 时间戳和操作按钮 —— 仅在消息生成完毕后显示 */}
+                  {/* 时间戳、操作按钮和 Token 用量 —— 仅在消息生成完毕后显示 */}
                   {!message.isStreaming && time && (
                     <div className="flex items-center gap-2">
                       <span className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>{time}</span>
@@ -289,6 +275,19 @@ export default function ChatArea({
                             {copiedId === message.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                           </button>
                         </div>
+                      )}
+                      {/* Token 用量 — 显示在操作按钮右侧 */}
+                      {!isUser && message.metrics && (
+                        <Tooltip
+                          title={`首字时延 ${message.metrics.ttftMs} ms | 每秒 ${message.metrics.tokensPerSecond} tokens`}
+                          placement="top"
+                        >
+                          <span className="text-[11px] cursor-help" style={{ color: 'var(--color-text-3)' }}>
+                            {message.metrics.totalTokens > 0
+                              ? `Tokens:${message.metrics.totalTokens} ↑${message.metrics.promptTokens} ↓${message.metrics.completionTokens}`
+                              : `TTFT: ${message.metrics.ttftMs}ms`}
+                          </span>
+                        </Tooltip>
                       )}
                     </div>
                   )}

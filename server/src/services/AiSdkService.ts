@@ -66,6 +66,7 @@ function createModel(provider: any, model: any) {
     name: provider.name,
     baseURL,
     apiKey: provider.api_key,
+    includeUsage: true,
   })
   const modelInstance = openaiCompatible.languageModel(model.name)
   modelCache.set(cacheKey, modelInstance)
