@@ -111,11 +111,18 @@ router.post('/completions', async (req: Request, res: Response) => {
 
   // 客户端断开连接时中止 LLM 调用
   const abortController = new AbortController();
-  req.on('close', () => {
-    if (!res.writableEnded) {
+  let clientDisconnected = false;
+  const handleDisconnect = () => {
+    if (!clientDisconnected) {
+      clientDisconnected = true;
       abortController.abort();
     }
-  });
+  };
+  // 监听响应流关闭（SSE 客户端断开）和请求中止
+  // 注意：不能用 req.on('close')，因为 Express body parser 消费完请求体后
+  // req 的 readable stream 会自然关闭，导致 abort 被提前触发
+  res.on('close', handleDisconnect);
+  req.on('aborted', handleDisconnect);
 
   // 发送对话 ID
   sendSSE({ type: 'meta', conversation_id: activeConvId });
@@ -143,7 +150,7 @@ router.post('/completions', async (req: Request, res: Response) => {
         fullRawContent += token;
         sendSSE({ type: 'token', content: token });
 
-        // 解析思考过程
+        // 解析思考过程（兼容 <think> 标签格式）
         const thinkMatch = fullRawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
         if (thinkMatch) {
           const thoughtProcess = thinkMatch[1].trim();
@@ -155,15 +162,23 @@ router.post('/completions', async (req: Request, res: Response) => {
           });
         }
       },
-      onComplete(fullText: string, metrics) {
+      onReasoning(token: string) {
+        sendSSE({ type: 'reasoning', content: token });
+      },
+      onComplete(fullText: string, metrics, reasoningText?: string) {
         // 解析最终内容
-        const thinkMatch = fullText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+        // 优先使用 AI SDK 分离的推理内容，其次从 <think> 标签中解析
         let parsedContent = fullText;
         let thoughtProcess: string | null = null;
 
-        if (thinkMatch) {
-          thoughtProcess = thinkMatch[1].trim();
-          parsedContent = fullText.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+        if (reasoningText) {
+          thoughtProcess = reasoningText.trim();
+        } else {
+          const thinkMatch = fullText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+          if (thinkMatch) {
+            thoughtProcess = thinkMatch[1].trim();
+            parsedContent = fullText.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+          }
         }
 
         // 保存助手消息到 DB（含性能指标）
@@ -209,21 +224,23 @@ router.post('/completions', async (req: Request, res: Response) => {
       },
     },
     abortController.signal,
+    thinkingMode,
   );
 
-  // 如果被中止，保存已有内容并通知前端
-  if (abortController.signal.aborted && fullRawContent) {
-    const thinkMatch = fullRawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
-    let parsedContent = fullRawContent;
+  // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
+  if (abortController.signal.aborted) {
+    const content = fullRawContent || '';
+    const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+    let parsedContent = content;
     let thoughtProcess: string | null = null;
     if (thinkMatch) {
       thoughtProcess = thinkMatch[1].trim();
-      parsedContent = fullRawContent.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+      parsedContent = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
     }
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, fullRawContent, thoughtProcess);
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -325,11 +342,15 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
   // 客户端断开连接时中止 LLM 调用
   const abortController = new AbortController();
-  req.on('close', () => {
-    if (!res.writableEnded) {
+  let clientDisconnected = false;
+  const handleDisconnect = () => {
+    if (!clientDisconnected) {
+      clientDisconnected = true;
       abortController.abort();
     }
-  });
+  };
+  res.on('close', handleDisconnect);
+  req.on('aborted', handleDisconnect);
 
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
@@ -359,13 +380,20 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           sendSSE({ type: 'parsed', thoughtProcess, displayContent });
         }
       },
-      onComplete(fullText: string, metrics) {
-        const thinkMatch = fullText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+      onReasoning(token: string) {
+        sendSSE({ type: 'reasoning', content: token });
+      },
+      onComplete(fullText: string, metrics, reasoningText?: string) {
         let parsedContent = fullText;
         let thoughtProcess: string | null = null;
-        if (thinkMatch) {
-          thoughtProcess = thinkMatch[1].trim();
-          parsedContent = fullText.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+        if (reasoningText) {
+          thoughtProcess = reasoningText.trim();
+        } else {
+          const thinkMatch = fullText.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+          if (thinkMatch) {
+            thoughtProcess = thinkMatch[1].trim();
+            parsedContent = fullText.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+          }
         }
 
         const aiMsgId = uuidv4();
@@ -401,26 +429,32 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         }
       },
       onError(error: Error) {
+        // 回滚：恢复被删除的消息，避免数据丢失
+        db.prepare(
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
+        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process);
         sendSSE({ type: 'error', message: error.message });
         res.end();
       },
     },
     abortController.signal,
+    regenThinkingMode,
   );
 
-  // 如果被中止，保存已有内容并通知前端
-  if (abortController.signal.aborted && fullRawContent) {
-    const thinkMatch = fullRawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
-    let parsedContent = fullRawContent;
+  // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
+  if (abortController.signal.aborted) {
+    const content = fullRawContent || '';
+    const thinkMatch = content.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+    let parsedContent = content;
     let thoughtProcess: string | null = null;
     if (thinkMatch) {
       thoughtProcess = thinkMatch[1].trim();
-      parsedContent = fullRawContent.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
+      parsedContent = content.replace(/<think>[\s\S]*?(?:<\/think>|$)/, '').trim();
     }
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, fullRawContent, thoughtProcess);
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }

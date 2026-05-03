@@ -1,7 +1,8 @@
 import type { Assistant, Conversation } from '../types';
 import { cn } from '../lib/utils';
-import { Plus, MoreHorizontal, MessageSquare, Settings, Database, Brain } from 'lucide-react';
+import { Plus, MoreHorizontal, MessageSquare, Settings, Database, Brain, Pencil, Trash2 } from 'lucide-react';
 import EmojiIcon from './shared/EmojiIcon';
+import { useState, useEffect, useRef } from 'react';
 
 interface SidebarProps {
   assistants: Assistant[];
@@ -13,6 +14,8 @@ interface SidebarProps {
   onCreateAssistant: () => void;
   onCreateConversation: () => void;
   onEditAssistant: (assistant: Assistant) => void;
+  onRemoveAssistant: (id: string) => void;
+  onRemoveConversation: (id: string) => void;
   isSettingsMode: boolean;
   onToggleSettings: (enabled: boolean) => void;
   settingsTab: 'model' | 'rag' | 'memory';
@@ -24,9 +27,57 @@ interface SidebarProps {
 export default function Sidebar({
   assistants, conversations, currentAssistantId, currentConversationId,
   onSelectAssistant, onSelectConversation, onCreateAssistant, onCreateConversation,
-  onEditAssistant, isSettingsMode, onToggleSettings, settingsTab, onSettingsTabChange,
+  onEditAssistant, onRemoveAssistant, onRemoveConversation, isSettingsMode, onToggleSettings, settingsTab, onSettingsTabChange,
   sidebarTab, onSidebarTabChange
 }: SidebarProps) {
+
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [pendingDeleteConvId, setPendingDeleteConvId] = useState<string | null>(null);
+  const [pendingDeleteAssistant, setPendingDeleteAssistant] = useState<Assistant | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpenMenuId(null);
+        setMenuPosition(null);
+      }
+    };
+    if (openMenuId) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openMenuId]);
+
+  const handleMenuToggle = (assistantId: string, buttonEl: HTMLButtonElement) => {
+    if (openMenuId === assistantId) {
+      setOpenMenuId(null);
+      setMenuPosition(null);
+    } else {
+      const rect = buttonEl.getBoundingClientRect();
+      // 向右下方展开：左上角对齐按钮的左下角
+      setMenuPosition({
+        top: rect.bottom + 4,
+        left: rect.right,
+      });
+      setOpenMenuId(assistantId);
+    }
+  };
+
+  const handleDelete = (assistant: Assistant) => {
+    setOpenMenuId(null);
+    setMenuPosition(null);
+    setPendingDeleteAssistant(assistant);
+  };
+
+  const confirmDeleteAssistant = (confirmed: boolean) => {
+    if (confirmed && pendingDeleteAssistant) {
+      onRemoveAssistant(pendingDeleteAssistant.id);
+    }
+    setPendingDeleteAssistant(null);
+  };
 
   const borderColor = 'var(--color-border)';
   const bgSoft = 'var(--color-background-soft)';
@@ -36,6 +87,7 @@ export default function Sidebar({
   const primaryColor = 'var(--color-primary)';
 
   return (
+    <>
     <div className="w-[280px] h-full flex flex-col shrink-0 border-r" style={{
       backgroundColor: bgSoft,
       borderColor,
@@ -103,8 +155,10 @@ export default function Sidebar({
                       </div>
                     </div>
                     <button
-                      onClick={(e) => { e.stopPropagation(); onEditAssistant(assistant); }}
-                      className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all hover:bg-black/10"
+                      ref={el => { if (el) buttonRefs.current.set(assistant.id, el); else buttonRefs.current.delete(assistant.id); }}
+                      onClick={(e) => { e.stopPropagation(); handleMenuToggle(assistant.id, e.currentTarget); }}
+                      className={cn("p-1.5 rounded-lg transition-all hover:bg-black/10 shrink-0",
+                        openMenuId === assistant.id ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
                       style={{ color: textSecondary }}
                     >
                       <MoreHorizontal className="w-4 h-4" />
@@ -136,9 +190,12 @@ export default function Sidebar({
                       .map(conversation => (
                         <div
                           key={conversation.id}
-                          onClick={() => onSelectConversation(conversation.id)}
+                          onClick={() => {
+                            onSelectConversation(conversation.id);
+                            setPendingDeleteConvId(null);
+                          }}
                           className={cn(
-                            "flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors mb-0.5"
+                            "flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors mb-0.5 group/conversation"
                           )}
                           style={{
                             backgroundColor: currentConversationId === conversation.id ? bgMute : 'transparent',
@@ -149,6 +206,25 @@ export default function Sidebar({
                         >
                           <MessageSquare className="w-4 h-4 shrink-0" style={{ opacity: 0.6 }} />
                           <div className="text-sm truncate flex-1">{conversation.title}</div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (pendingDeleteConvId === conversation.id) {
+                                onRemoveConversation(conversation.id);
+                                setPendingDeleteConvId(null);
+                              } else {
+                                setPendingDeleteConvId(conversation.id);
+                              }
+                            }}
+                            className={cn(
+                              "p-1 rounded transition-all opacity-0 group-hover/conversation:opacity-100",
+                              pendingDeleteConvId === conversation.id ? "opacity-100 bg-red-100" : "hover:bg-black/10"
+                            )}
+                            style={{ color: pendingDeleteConvId === conversation.id ? '#dc2626' : textSecondary }}
+                            title={pendingDeleteConvId === conversation.id ? '再次点击确认删除' : '删除话题'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       ))
                   )}
@@ -206,5 +282,71 @@ export default function Sidebar({
         </div>
       )}
     </div>
+
+    {/* 助手悬浮菜单 — 使用 fixed 定位避免被侧边栏 overflow 裁剪 */}
+    {openMenuId && menuPosition && (() => {
+      const assistant = assistants.find(a => a.id === openMenuId);
+      if (!assistant) return null;
+      return (
+        <div ref={menuRef} className="fixed w-36 rounded-xl border shadow-lg py-1 z-[9999]"
+          style={{
+            top: menuPosition.top,
+            left: menuPosition.left,
+            backgroundColor: 'var(--color-background)',
+            borderColor: 'var(--color-border)',
+          }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); setMenuPosition(null); onEditAssistant(assistant); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-black/5 transition-colors"
+            style={{ color: textColor }}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            编辑助手
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDelete(assistant); }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-red-50 transition-colors"
+            style={{ color: '#dc2626' }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            删除助手
+          </button>
+        </div>
+      );
+    })()}
+
+    {/* 删除确认弹窗 — 自定义弹窗替代浏览器 confirm */}
+    {pendingDeleteAssistant && (
+      <div className="fixed inset-0 z-[10000] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+        onClick={() => confirmDeleteAssistant(false)}>
+        <div className="w-80 rounded-2xl shadow-2xl p-6"
+          style={{ backgroundColor: 'var(--color-background)' }}
+          onClick={e => e.stopPropagation()}>
+          <div className="text-lg font-bold mb-3" style={{ color: 'var(--color-text)' }}>
+            确认删除
+          </div>
+          <div className="text-sm mb-6" style={{ color: 'var(--color-text-2)' }}>
+            确定要删除助手「{pendingDeleteAssistant.name}」吗？此操作不可撤销。
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button
+              onClick={() => confirmDeleteAssistant(false)}
+              className="px-5 py-2 rounded-lg text-sm font-medium border transition-colors"
+              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}
+            >
+              取消
+            </button>
+            <button
+              onClick={() => confirmDeleteAssistant(true)}
+              className="px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+              style={{ backgroundColor: '#dc2626' }}
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   );
 }

@@ -55,8 +55,11 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setName('');
         setSystemPrompt('');
         setEmoji(getNextDefaultEmoji());
-        setProviderId(providers[0]?.id || '');
-        setModelId('');
+        // 默认选择第一个启用的供应商，并自动选择其第一个模型
+        const firstProvider = providers[0];
+        setProviderId(firstProvider?.id || '');
+        const firstProviderModels = models.filter(m => m.provider_id === firstProvider?.id);
+        setModelId(firstProviderModels[0]?.id || '');
         setTemperatureEnabled(false);
         setTemperature(0.7);
         setContextRounds(10);
@@ -219,7 +222,11 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                     <label className="block text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>模型提供商</label>
                     <select
                       value={providerId}
-                      onChange={e => { setProviderId(e.target.value); setModelId(''); }}
+                      onChange={e => {
+                        setProviderId(e.target.value);
+                        const newProviderModels = models.filter(m => m.provider_id === e.target.value);
+                        setModelId(newProviderModels[0]?.id || '');
+                      }}
                       className="w-full px-4 py-2.5 rounded-xl border focus:outline-none text-sm appearance-none"
                       style={{
                         backgroundColor: 'var(--color-background)',
@@ -271,8 +278,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                       <input
                         type="range" min="0" max="2" step="0.1" value={temperature}
                         onChange={e => setTemperature(parseFloat(e.target.value))}
-                        className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-                        style={{ accentColor: 'var(--color-primary)' }}
+                        className="w-full h-2 rounded-lg cursor-pointer"
                       />
                     )}
                     <div className="text-xs mt-1" style={{ color: 'var(--color-text-3)' }}>
@@ -289,8 +295,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                     <input
                       type="range" min="0" max="100" step="1" value={contextRounds}
                       onChange={e => setContextRounds(parseInt(e.target.value))}
-                      className="w-full h-2 rounded-lg appearance-none cursor-pointer"
-                      style={{ accentColor: 'var(--color-primary)' }}
+                      className="w-full cursor-pointer"
                     />
                   </div>
 

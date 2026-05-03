@@ -3,6 +3,9 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText as _streamText, generateText as _generateText } from 'ai'
 import { getDb } from '../db/connection.js'
 
+// 缓存 provider SDK 实例，避免每次请求重新创建连接
+const modelCache = new Map<string, any>()
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
   content: string
@@ -10,7 +13,8 @@ export interface ChatMessage {
 
 export interface StreamCallbacks {
   onToken: (token: string) => void
-  onComplete: (fullText: string, metrics?: StreamMetrics) => void
+  onReasoning: (token: string) => void
+  onComplete: (fullText: string, metrics?: StreamMetrics, reasoningText?: string) => void
   onError: (error: Error) => void
 }
 
@@ -48,9 +52,14 @@ export function normalizeBaseUrl(url: string): string {
 
 /**
  * 根据 provider 记录创建 AI SDK 模型实例
- * AI SDK 会在 baseURL 后自动拼接 /chat/completions
+ * 使用缓存避免每次请求重新创建 HTTP 连接
  */
 function createModel(provider: any, model: any) {
+  const cacheKey = `${provider.id}:${model.id}`
+  if (modelCache.has(cacheKey)) {
+    return modelCache.get(cacheKey)
+  }
+
   const baseURL = normalizeBaseUrl(provider.base_url)
 
   const openaiCompatible = createOpenAICompatible({
@@ -58,7 +67,9 @@ function createModel(provider: any, model: any) {
     baseURL,
     apiKey: provider.api_key,
   })
-  return openaiCompatible.languageModel(model.name)
+  const modelInstance = openaiCompatible.languageModel(model.name)
+  modelCache.set(cacheKey, modelInstance)
+  return modelInstance
 }
 
 export class AiSdkService {
@@ -70,6 +81,7 @@ export class AiSdkService {
     temperature: number,
     callbacks: StreamCallbacks,
     abortSignal?: AbortSignal,
+    thinkingMode?: string,
   ): Promise<void> {
     const db = getDb()
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
@@ -90,54 +102,79 @@ export class AiSdkService {
       return
     }
 
-    try {
-      const startTime = Date.now();
-      let firstTokenTime = 0;
-      let fullText = '';
+    let streamResult: any = null
 
-      const result = await _streamText({
-        model: createModel(provider, model),
+    try {
+      const startTime = Date.now()
+      let firstTokenTime = 0
+      let fullText = ''
+
+      const sdkModel = createModel(provider, model)
+
+      // 构建 providerOptions：传递思考控制参数
+      const providerOptions: Record<string, any> = {}
+      if (thinkingMode === 'disabled' || thinkingMode === 'enabled') {
+        providerOptions.openaiCompatible = {
+          enable_thinking: thinkingMode === 'enabled',
+        }
+      }
+
+      streamResult = await _streamText({
+        model: sdkModel,
         messages,
         temperature,
         abortSignal,
+        ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
       })
-
       // 使用 fullStream 消费 —— 既可获取文本也能从 finish 事件获取 usage
-      for await (const part of result.fullStream) {
-        if (abortSignal?.aborted) break;
+      let reasoningText = ''
+      for await (const part of streamResult.fullStream) {
+        if (abortSignal?.aborted) break
 
         switch (part.type) {
           case 'text-delta': {
             if (firstTokenTime === 0) {
-              firstTokenTime = Date.now();
+              firstTokenTime = Date.now()
             }
-            const text = part.text;
-            fullText += text;
-            callbacks.onToken(text);
-            break;
+            const text = part.text
+            fullText += text
+            callbacks.onToken(text)
+            break
+          }
+          case 'reasoning-delta': {
+            if (firstTokenTime === 0) {
+              firstTokenTime = Date.now()
+            }
+            reasoningText += part.text
+            callbacks.onReasoning(part.text)
+            break
           }
           case 'error': {
-            callbacks.onError(new Error(String(part.error)));
-            return;
+            callbacks.onError(new Error(String(part.error)))
+            return
           }
         }
       }
 
       // 如果被中止，不触发 onComplete
       if (abortSignal?.aborted) {
-        return;
+        return
       }
 
       // 收集用量和性能指标
-      let metrics: StreamMetrics | undefined;
+      let metrics: StreamMetrics | undefined
       try {
-        const usage = await result.usage;
-        const endTime = Date.now();
-        const inputTokens = usage.inputTokens || 0;
-        const outputTokens = usage.outputTokens || 0;
-        const ttftMs = firstTokenTime > 0 ? firstTokenTime - startTime : 0;
-        const generationTime = firstTokenTime > 0 ? endTime - firstTokenTime : 1;
-        const tokensPerSecond = generationTime > 0 ? Math.round(outputTokens / (generationTime / 1000)) : 0;
+        // 尝试从 streamResult.usage 获取（camelCase）
+        const usage = await streamResult.usage
+        const endTime = Date.now()
+
+        // 兼容 snake_case 回退（部分 API 如 DashScope 使用 prompt_tokens 等）
+        const rawUsage = usage as any
+        const inputTokens = usage.inputTokens || rawUsage?.prompt_tokens || rawUsage?.promptTokens || 0
+        const outputTokens = usage.outputTokens || rawUsage?.completion_tokens || rawUsage?.completionTokens || 0
+        const ttftMs = firstTokenTime > 0 ? firstTokenTime - startTime : 0
+        const generationTime = firstTokenTime > 0 ? endTime - firstTokenTime : 1
+        const tokensPerSecond = generationTime > 0 ? Math.round(outputTokens / (generationTime / 1000)) : 0
 
         metrics = {
           promptTokens: inputTokens,
@@ -145,15 +182,15 @@ export class AiSdkService {
           totalTokens: inputTokens + outputTokens,
           ttftMs,
           tokensPerSecond,
-        };
+        }
       } catch {
-        console.warn('[AiSdkService] 无法获取 token 用量信息');
+        console.warn('[AiSdkService] 无法获取 token 用量信息')
       }
 
-      callbacks.onComplete(fullText, metrics)
+      callbacks.onComplete(fullText, metrics, reasoningText || undefined)
     } catch (err: any) {
       if (err?.name === 'AbortError' || abortSignal?.aborted) {
-        return; // 用户主动取消，不报错
+        return // 用户主动取消，不报错
       }
       console.error('[AiSdkService] streamText 异常:', err)
       callbacks.onError(err instanceof Error ? err : new Error(String(err)))

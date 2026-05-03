@@ -22,7 +22,11 @@ interface ChatAreaProps {
 
 /** 格式化时间: YYYY-MM-DD HH:mm:ss */
 function formatTime(iso: string): string {
-  const d = new Date(iso);
+  // SQLite datetime('now') 存储 UTC 无时区标记（如 "2026-05-03 04:05:46"）
+  // 前端 new Date().toISOString() 自带 "Z" 后缀
+  // 对无时区的 SQLite 字符串附加 Z，让 JS 正确识别为 UTC 并转为本地时间
+  const hasTz = iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso);
+  const d = new Date(hasTz ? iso : iso.replace(' ', 'T') + 'Z');
   const Y = d.getFullYear();
   const M = String(d.getMonth() + 1).padStart(2, '0');
   const D = String(d.getDate()).padStart(2, '0');
@@ -200,7 +204,8 @@ export default function ChatArea({
                   {message.thought_process && (
                     <ThinkBlock content={message.thought_process} />
                   )}
-                  {message.content && (
+                  {/* 消息气泡 */}
+                  {message.content ? (
                     <div className={cn(
                       "px-4 py-3 rounded-2xl",
                       isUser
@@ -216,29 +221,11 @@ export default function ChatArea({
                     }}>
                       {isUser ? (
                         <div className="whitespace-pre-wrap text-sm">{message.content}</div>
-                      ) : message.aborted ? (
-                        <div className="flex items-center gap-2 text-sm" style={{ color: '#dc2626' }}>
-                          <AlertTriangle className="w-4 h-4 shrink-0" />
-                          <span>请求被中止，可能由于超时、用户取消或服务器端主动中断导致。</span>
-                        </div>
                       ) : (
                         <StreamingMarkdown content={message.content} isStreaming={message.isStreaming} />
                       )}
                     </div>
-                  )}
-                  {/* Token 用量 — 在气泡框外右下角，仅 AI 消息且生成完毕后显示 */}
-                  {!isUser && !message.isStreaming && message.metrics && message.metrics.totalTokens > 0 && (
-                    <div className="flex justify-end">
-                      <span
-                        className="text-[11px] cursor-help px-1"
-                        style={{ color: 'var(--color-text-3)' }}
-                        title={`首字时延 ${message.metrics.ttftMs} ms | 每秒 ${message.metrics.tokensPerSecond} tokens`}
-                      >
-                        Tokens: {message.metrics.totalTokens} ↑ {message.metrics.promptTokens} ↓ {message.metrics.completionTokens}
-                      </span>
-                    </div>
-                  )}
-                  {message.isStreaming && !message.content && (
+                  ) : message.isStreaming ? (
                     <div className="px-4 py-3 rounded-2xl rounded-tl-sm border" style={{
                       backgroundColor: 'var(--color-background-soft)',
                       borderColor: 'var(--color-border-soft)',
@@ -248,6 +235,33 @@ export default function ChatArea({
                         <span className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-primary)', animationDelay: '150ms' }} />
                         <span className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-primary)', animationDelay: '300ms' }} />
                       </div>
+                    </div>
+                  ) : null}
+
+                  {/* 中止气泡 —— 独立样式，有内容时显示在回复气泡下方，无内容时单独显示 */}
+                  {!isUser && message.aborted && (
+                    <div className="px-3 py-2 rounded-xl border" style={{
+                      backgroundColor: '#fef2f2',
+                      borderColor: '#fecaca',
+                    }}>
+                      <div className="flex items-center gap-1.5" style={{ color: '#dc2626' }}>
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span className="text-xs">请求被中止，可能由于超时、用户取消或服务器端主动中断导致。</span>
+                      </div>
+                    </div>
+                  )}
+                  {/* Token 用量 — 在气泡框外右下角，仅 AI 消息且生成完毕后显示 */}
+                  {!isUser && !message.isStreaming && message.metrics && (
+                    <div className="flex justify-end">
+                      <span
+                        className="text-[11px] cursor-help px-1"
+                        style={{ color: 'var(--color-text-3)' }}
+                        title={`首字时延 ${message.metrics.ttftMs} ms | 每秒 ${message.metrics.tokensPerSecond} tokens`}
+                      >
+                        {message.metrics.totalTokens > 0
+                          ? `Tokens: ${message.metrics.totalTokens} ↑ ${message.metrics.promptTokens} ↓ ${message.metrics.completionTokens}`
+                          : `TTFT: ${message.metrics.ttftMs}ms`}
+                      </span>
                     </div>
                   )}
 
@@ -288,9 +302,9 @@ export default function ChatArea({
         </div>
       </div>
 
-      {/* Input Area */}
-      <div className="absolute bottom-0 left-0 right-0 px-6 md:px-10 pb-4 pt-10 bg-gradient-to-t from-[var(--color-background)] via-[var(--color-background)] to-transparent">
-        <div className="w-full">
+      {/* Input Area — pointer-events-none 让渐变区域不阻挡下方消息的点击 */}
+      <div className="absolute bottom-0 left-0 right-0 px-6 md:px-10 pb-4 pt-10 bg-gradient-to-t from-[var(--color-background)] via-[var(--color-background)] to-transparent pointer-events-none">
+        <div className="w-full pointer-events-auto">
           <div className="rounded-2xl border shadow-sm transition-all flex flex-col"
             style={{
               backgroundColor: 'var(--color-background-soft)',
@@ -361,10 +375,16 @@ export default function ChatArea({
                 </button>
               </div>
               <div className="flex gap-1.5 items-center">
-                {/* 上下文轮数显示 */}
-                <div className="flex items-center px-2.5 py-1.5 rounded-full text-xs"
-                  style={{ color: usedRounds >= maxRounds ? 'var(--color-primary)' : 'var(--color-text-3)' }}>
-                  {usedRounds}/{maxRounds}
+                {/* 上下文轮数 — 紧挨上传按钮左侧 */}
+                <div className="flex items-center gap-1 px-2 py-1 rounded-full text-xs border"
+                  style={{
+                    backgroundColor: 'var(--color-background-soft)',
+                    borderColor: 'var(--color-border)',
+                    color: usedRounds >= maxRounds ? 'var(--color-primary)' : 'var(--color-text-3)'
+                  }}>
+                  <span>上下文</span>
+                  <span className="font-bold">{usedRounds}/{maxRounds}</span>
+                  <span>轮</span>
                 </div>
                 <button type="button" className="p-2 rounded-full transition-colors hover:bg-black/5"
                   style={{ color: 'var(--color-icon)' }}>

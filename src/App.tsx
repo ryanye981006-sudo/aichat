@@ -17,6 +17,7 @@ export default function App() {
   const [currentAssistantId, setCurrentAssistantId] = useState<string | null>(null);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [isSettingsMode, setIsSettingsMode] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
@@ -141,6 +142,30 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
+  const handleRemoveAssistant = async (id: string) => {
+    try {
+      await assistantsApi.remove(id);
+      setAssistants(prev => prev.filter(a => a.id !== id));
+      if (currentAssistantId === id) {
+        setCurrentAssistantId(null);
+        setCurrentConversationId(null);
+        setMessages([]);
+        setConversations([]);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const handleRemoveConversation = async (id: string) => {
+    try {
+      await conversationsApi.remove(id);
+      setConversations(prev => prev.filter(c => c.id !== id));
+      if (currentConversationId === id) {
+        setCurrentConversationId(null);
+        setMessages([]);
+      }
+    } catch (e) { console.error(e); }
+  };
+
   // ===== 对话操作 =====
   const handleSelectConversation = useCallback((id: string) => {
     setCurrentConversationId(id);
@@ -165,7 +190,10 @@ export default function App() {
 
   // ===== 发送消息 =====
   const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default') => {
-    if (!currentAssistantId || isStreaming) return;
+    if (!currentAssistantId) return;
+
+    // 只阻止当前活跃会话在流式时发送消息
+    if (isStreaming && streamingConversationId === currentConversationId) return;
 
     let activeConvId = currentConversationId;
 
@@ -204,6 +232,7 @@ export default function App() {
 
     setMessages(prev => [...prev, userMsg, aiMsg]);
     setIsStreaming(true);
+    setStreamingConversationId(activeConvId);
 
     const hasMessages = messages.length > 0;
     if (!hasMessages) {
@@ -213,12 +242,14 @@ export default function App() {
     }
 
     let fullRawContent = '';
+    let currentReasoning = '';
 
     const controller = chatSSE(currentAssistantId, content, activeConvId, thinkingMode, {
       onMeta(convId) {
         if (convId !== activeConvId) {
           setCurrentConversationId(convId);
           activeConvId = convId;
+          setStreamingConversationId(convId);
         }
       },
       onToken(token) {
@@ -232,6 +263,12 @@ export default function App() {
           m.id === aiMsg.id ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
         ));
       },
+      onReasoning(token: string) {
+        currentReasoning += token;
+        setMessages(prev => prev.map(m =>
+          m.id === aiMsg.id ? { ...m, thought_process: currentReasoning } : m
+        ));
+      },
       onDone(messageId, content, thoughtProcess, metrics, aborted) {
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id
@@ -239,6 +276,7 @@ export default function App() {
             : m
         ));
         setIsStreaming(false);
+        setStreamingConversationId(null);
         setAbortController(null);
         if (activeConvId) loadMessages(activeConvId);
         if (currentAssistantId) loadConversations(currentAssistantId);
@@ -250,65 +288,133 @@ export default function App() {
             : m
         ));
         setIsStreaming(false);
+        setStreamingConversationId(null);
         setAbortController(null);
       },
     });
     setAbortController(controller);
-  }, [currentAssistantId, currentConversationId, isStreaming, messages.length]);
+  }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
 
   // ===== 重新生成 =====
   const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default') => {
-    if (!currentAssistantId || !currentConversationId || isStreaming) return;
+    if (!currentAssistantId || !currentConversationId) return;
+    if (isStreaming && streamingConversationId === currentConversationId) return;
 
     const activeConvId = currentConversationId;
 
+    // 立即隐藏旧消息并显示 loading，不等服务端响应
     setMessages(prev => prev.map(m =>
-      m.id === messageId ? { ...m, content: '', raw_content: '', thought_process: null, isStreaming: true } : m
+      m.id === messageId ? { ...m, content: '', raw_content: '', thought_process: null, isStreaming: true, aborted: false, metrics: undefined } : m
     ));
     setIsStreaming(true);
+    setStreamingConversationId(activeConvId);
+
+    let effectiveMessageId = messageId;
+
+    // 如果消息 ID 是临时的（被终止的消息），先从服务端加载获取真实 ID
+    if (messageId.startsWith('temp-')) {
+      try {
+        const msgs = await messagesApi.list(activeConvId);
+        const normalized = msgs.map(normalizeMessageMetrics);
+
+        const lastAi = [...normalized].reverse().find(m => m.role === 'assistant');
+        if (!lastAi || lastAi.id.startsWith('temp-')) {
+          setIsStreaming(false);
+          setStreamingConversationId(null);
+          return;
+        }
+        effectiveMessageId = lastAi.id;
+        // 用服务端真实记录替换 temp ID 消息，清空内容并保持 streaming 状态
+        setMessages(prev => prev.map(m =>
+          m.id === messageId ? { ...lastAi, content: '', raw_content: '', thought_process: null, isStreaming: true, aborted: false, metrics: undefined } : m
+        ));
+      } catch {
+        setIsStreaming(false);
+        setStreamingConversationId(null);
+        return;
+      }
+    } else {
+      // 非 temp-ID：验证消息在服务端是否仍存在（上次 regenerate 被中止后消息 ID 会变化）
+      try {
+        const msgs = await messagesApi.list(activeConvId);
+        const exists = msgs.some((m: any) => m.id === messageId);
+        if (!exists) {
+          const normalized = msgs.map(normalizeMessageMetrics);
+          const lastAi = [...normalized].reverse().find((m: any) => m.role === 'assistant');
+          if (!lastAi || lastAi.id.startsWith('temp-')) {
+            setIsStreaming(false);
+            setStreamingConversationId(null);
+            return;
+          }
+          effectiveMessageId = lastAi.id;
+          // 同步更新前端消息 ID，保持 streaming 状态
+          setMessages(prev => prev.map(m =>
+            m.id === messageId ? { ...lastAi, isStreaming: true, aborted: false, content: '', raw_content: '', thought_process: null, metrics: undefined } : m
+          ));
+        }
+      } catch {
+        setIsStreaming(false);
+        setStreamingConversationId(null);
+        return;
+      }
+    }
 
     let fullRawContent = '';
+    let currentReasoning = '';
 
-    const regenController = regenerateSSE(currentAssistantId, activeConvId, messageId, thinkingMode, {
+    const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, {
       onToken(token) {
         fullRawContent += token;
         setMessages(prev => prev.map(m =>
-          m.id === messageId ? { ...m, raw_content: fullRawContent, content: fullRawContent } : m
+          m.id === effectiveMessageId ? { ...m, raw_content: fullRawContent, content: fullRawContent, aborted: false } : m
         ));
       },
       onParsed(thoughtProcess, displayContent) {
         setMessages(prev => prev.map(m =>
-          m.id === messageId ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
+          m.id === effectiveMessageId ? { ...m, thought_process: thoughtProcess, content: displayContent, aborted: false } : m
+        ));
+      },
+      onReasoning(token) {
+        currentReasoning += token;
+        setMessages(prev => prev.map(m =>
+          m.id === effectiveMessageId ? { ...m, thought_process: currentReasoning } : m
         ));
       },
       onDone(newMsgId, content, thoughtProcess, metrics, aborted) {
         setMessages(prev => prev.map(m =>
-          m.id === messageId
+          m.id === effectiveMessageId
             ? { ...m, id: newMsgId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
             : m
         ));
         setIsStreaming(false);
+        setStreamingConversationId(null);
         setAbortController(null);
         loadMessages(activeConvId);
       },
       onError(error) {
         setMessages(prev => prev.map(m =>
-          m.id === messageId
+          m.id === effectiveMessageId
             ? { ...m, content: `错误: ${error}`, isStreaming: false }
             : m
         ));
         setIsStreaming(false);
+        setStreamingConversationId(null);
         setAbortController(null);
       },
     });
     setAbortController(regenController);
-  }, [currentAssistantId, currentConversationId, isStreaming]);
+  }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages]);
 
   // ===== 停止生成 =====
   const handleStopGeneration = useCallback(() => {
     if (abortController) {
       abortController.abort();
       setAbortController(null);
+      setIsStreaming(false);
+      setStreamingConversationId(null);
+      setMessages(prev => prev.map(m =>
+        m.isStreaming ? { ...m, isStreaming: false, aborted: true } : m
+      ));
     }
   }, [abortController]);
 
@@ -336,6 +442,8 @@ export default function App() {
           onCreateAssistant={handleCreateAssistant}
           onCreateConversation={handleCreateConversation}
           onEditAssistant={handleEditAssistant}
+          onRemoveAssistant={handleRemoveAssistant}
+          onRemoveConversation={handleRemoveConversation}
           isSettingsMode={isSettingsMode}
           onToggleSettings={setIsSettingsMode}
           settingsTab={settingsTab}
