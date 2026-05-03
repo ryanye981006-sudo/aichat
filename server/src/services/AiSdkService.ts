@@ -66,7 +66,7 @@ export function normalizeBaseUrl(url: string): string {
  * 使用缓存避免每次请求重新创建 HTTP 连接
  */
 function createModel(provider: any, model: any) {
-  const cacheKey = `${provider.id}:${model.id}`
+  const cacheKey = `${provider.id}:${model.id || model.name}`
   if (modelCache.has(cacheKey)) {
     return modelCache.get(cacheKey)
   }
