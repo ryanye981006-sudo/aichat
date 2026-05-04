@@ -5,6 +5,7 @@ import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
 import EmojiIcon from './shared/EmojiIcon';
 import EmojiPicker from './shared/EmojiPicker';
+import ModelSelectModal from './shared/ModelSelectModal';
 
 interface AssistantModalProps {
   isOpen: boolean;
@@ -37,6 +38,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
   const [contextRounds, setContextRounds] = useState(10);
   const [enableMemory, setEnableMemory] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('default');
+  const [showModelSelect, setShowModelSelect] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -90,9 +92,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
     });
     onClose();
   };
-
-  const enabledProviders = providers.filter(p => p.enabled);
-  const availableModels = models.filter(m => m.provider_id === providerId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -219,45 +218,30 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
               {activeTab === 'model' && (
                 <div className="space-y-6">
                   <div>
-                    <label className="block text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>模型提供商</label>
-                    <select
-                      value={providerId}
-                      onChange={e => {
-                        setProviderId(e.target.value);
-                        const newProviderModels = models.filter(m => m.provider_id === e.target.value);
-                        setModelId(newProviderModels[0]?.id || '');
-                      }}
-                      className="w-full px-4 py-2.5 rounded-xl border focus:outline-none text-sm appearance-none"
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>默认模型</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowModelSelect(true)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:bg-black/5"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                      >
+                        选择模型
+                      </button>
+                    </div>
+                    <div className="px-4 py-2.5 rounded-xl border text-sm"
                       style={{
                         backgroundColor: 'var(--color-background)',
                         borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      <option value="">选择提供商</option>
-                      {enabledProviders.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>默认模型</label>
-                    <select
-                      value={modelId}
-                      onChange={e => setModelId(e.target.value)}
-                      className="w-full px-4 py-2.5 rounded-xl border focus:outline-none text-sm appearance-none"
-                      style={{
-                        backgroundColor: 'var(--color-background)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      <option value="">选择模型</option>
-                      {availableModels.map(m => (
-                        <option key={m.id} value={m.id}>{m.display_name || m.name}</option>
-                      ))}
-                    </select>
+                        color: modelId ? 'var(--color-text)' : 'var(--color-text-3)',
+                      }}>
+                      {(() => {
+                        const selectedModel = models.find(m => m.id === modelId);
+                        if (!selectedModel) return '未选择模型';
+                        const p = providers.find(pr => pr.id === selectedModel.provider_id);
+                        return `${selectedModel.display_name || selectedModel.name} | ${p?.name || ''}`;
+                      })()}
+                    </div>
                   </div>
 
                   {/* Temperature Toggle */}
@@ -363,6 +347,18 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
           </div>
         </form>
       </div>
+
+      <ModelSelectModal
+        isOpen={showModelSelect}
+        onClose={() => setShowModelSelect(false)}
+        onSelect={(providerId, modelId) => {
+          setProviderId(providerId);
+          setModelId(modelId);
+        }}
+        providers={providers.filter(p => p.enabled)}
+        models={models}
+        currentModelId={modelId}
+      />
     </div>
   );
 }

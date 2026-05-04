@@ -1038,7 +1038,7 @@ function FetchModelsModal({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)', maxHeight: '85vh' }}>
+      <div className="rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)', height: '800px' }}>
         {/* Header */}
         <div className="px-5 py-4 border-b flex justify-between items-center shrink-0" style={{ borderColor: 'var(--color-border)' }}>
           <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>{providerName}模型</h3>
