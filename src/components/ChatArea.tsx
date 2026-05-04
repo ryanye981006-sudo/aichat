@@ -199,7 +199,7 @@ export default function ChatArea({
                 <div className={cn("flex flex-col gap-1.5 flex-1 min-w-0", isUser ? "items-end" : "items-start")}>
                   {/* 发送者名称 */}
                   <span className="text-xs font-medium px-1" style={{ color: 'var(--color-text-2)' }}>
-                    {isUser ? '用户' : assistantLabel}
+                    {isUser ? '用户' : (message.model_name ? `${message.model_name} | ${message.provider_name || ''}` : assistantLabel)}
                   </span>
 
                   {message.thought_process && (

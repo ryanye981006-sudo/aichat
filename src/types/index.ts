@@ -61,6 +61,8 @@ export interface Message {
   content: string;
   raw_content: string;
   thought_process: string | null;
+  model_name?: string | null;
+  provider_name?: string | null;
   metrics?: MessageMetrics | null;
   aborted?: boolean;
   created_at: string;

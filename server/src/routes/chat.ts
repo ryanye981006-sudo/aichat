@@ -37,8 +37,12 @@ router.post('/completions', async (req: Request, res: Response) => {
     return;
   }
 
-  // 加载模型名称（用于 Qwen /no_think 后缀检测等）
-  const modelName = (db.prepare('SELECT name FROM models WHERE id = ?').get(assistant.model_id) as any)?.name || '';
+  // 加载模型名称和供应商名称（用于 Qwen /no_think 后缀检测、消息记录等）
+  const model = db.prepare('SELECT * FROM models WHERE id = ?').get(assistant.model_id) as any;
+  const modelName = model?.name || '';
+  const providerName = model
+    ? (db.prepare('SELECT name FROM providers WHERE id = ?').get(model.provider_id) as any)?.name || ''
+    : '';
 
   // 确保对话存在
   let activeConvId = conversation_id;
@@ -52,8 +56,8 @@ router.post('/completions', async (req: Request, res: Response) => {
   // 保存用户消息
   const userMsgId = uuidv4();
   db.prepare(
-    'INSERT INTO messages (id, conversation_id, role, content, raw_content) VALUES (?, ?, ?, ?, ?)'
-  ).run(userMsgId, activeConvId, 'user', message, message);
+    'INSERT INTO messages (id, conversation_id, role, content, raw_content, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(userMsgId, activeConvId, 'user', message, message, modelName || null, providerName || null);
 
   // 更新对话时间
   db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
@@ -202,9 +206,10 @@ router.post('/completions', async (req: Request, res: Response) => {
         // 保存助手消息到 DB（含性能指标）
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, activeConvId, 'assistant', parsedContent, fullText, thoughtProcess,
+          modelName, providerName || null,
           metrics?.promptTokens ?? null,
           metrics?.completionTokens ?? null,
           metrics?.ttftMs ?? null,
@@ -257,8 +262,8 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -287,8 +292,12 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     return;
   }
 
-  // 加载模型名称（用于 Qwen /no_think 后缀检测等）
-  const modelName = (db.prepare('SELECT name FROM models WHERE id = ?').get(assistant.model_id) as any)?.name || '';
+  // 加载模型名称和供应商名称（用于 Qwen /no_think 后缀检测、消息记录等）
+  const model = db.prepare('SELECT * FROM models WHERE id = ?').get(assistant.model_id) as any;
+  const modelName = model?.name || '';
+  const providerName = model
+    ? (db.prepare('SELECT name FROM providers WHERE id = ?').get(model.provider_id) as any)?.name || ''
+    : '';
 
   // 验证消息存在且为助手消息
   const targetMsg = db.prepare('SELECT * FROM messages WHERE id = ? AND conversation_id = ? AND role = ?').get(message_id, conversation_id, 'assistant') as any;
@@ -427,9 +436,10 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, conversation_id, 'assistant', parsedContent, fullText, thoughtProcess,
+          modelName, providerName || null,
           metrics?.promptTokens ?? null,
           metrics?.completionTokens ?? null,
           metrics?.ttftMs ?? null,
@@ -460,8 +470,8 @@ router.post('/regenerate', async (req: Request, res: Response) => {
       onError(error: Error) {
         // 回滚：恢复被删除的消息，避免数据丢失
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process);
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process, targetMsg.model_name || modelName, targetMsg.provider_name || providerName || null);
         sendSSE({ type: 'error', message: error.message });
         res.end();
       },
@@ -482,8 +492,8 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
