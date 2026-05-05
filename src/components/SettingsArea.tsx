@@ -1653,26 +1653,29 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
 // ===== 搜索测试面板 =====
 function SearchTestPanel({ kbId }: { kbId: string }) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<any[] | null>(null);
   const [searching, setSearching] = useState(false);
 
   const handleSearch = async () => {
     if (!query.trim() || searching) return;
     setSearching(true);
+    setResults(null); // 清除旧结果，显示 loading
     try {
       const res = await knowledgeApi.search(kbId, query.trim());
-      setResults(res);
+      // 确保按分数降序排列（后端已排序，前端二次保证）
+      setResults(res.sort((a: any, b: any) => b.score - a.score));
     } catch (err) {
       console.error('搜索测试失败:', err);
+      setResults([]);
     } finally {
       setSearching(false);
     }
   };
 
   return (
-    <div>
-      <h4 className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>搜索测试</h4>
-      <div className="flex gap-2 mb-3">
+    <div className="flex flex-col h-full">
+      <h4 className="text-sm font-bold mb-3 shrink-0" style={{ color: 'var(--color-text)' }}>搜索测试</h4>
+      <div className="flex gap-2 mb-4 shrink-0">
         <input
           type="text"
           value={query}
@@ -1684,30 +1687,50 @@ function SearchTestPanel({ kbId }: { kbId: string }) {
         />
         <button
           onClick={handleSearch}
-          disabled={searching}
-          className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+          disabled={searching || !query.trim()}
+          className="px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
           style={{ backgroundColor: 'var(--color-primary)' }}
         >
           {searching ? '搜索中...' : '搜索'}
         </button>
       </div>
-      {results.length > 0 && (
-        <div className="space-y-2 max-h-[300px] overflow-y-auto">
-          {results.map((r, i) => (
-            <div key={i} className="rounded-lg border p-3 text-xs"
-              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-background-soft)' }}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-medium" style={{ color: 'var(--color-text)' }}>{r.documentName}</span>
-                <span style={{ color: 'var(--color-primary)' }}>{(r.score * 100).toFixed(0)}%</span>
+
+      {/* 结果区域：撑满剩余高度，整体滚动 */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {/* Loading 状态 */}
+        {searching && (
+          <div className="flex items-center justify-center py-8 gap-2" style={{ color: 'var(--color-text-3)' }}>
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm">正在搜索...</span>
+          </div>
+        )}
+
+        {/* 搜索结果（按分数降序） */}
+        {!searching && results && results.length > 0 && (
+          <div className="space-y-2 pb-2">
+            {results.map((r, i) => (
+              <div key={i} className="rounded-lg border p-3 text-xs"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-background-soft)' }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-medium truncate mr-2" style={{ color: 'var(--color-text)' }}>{r.documentName}</span>
+                  <span className="shrink-0 font-bold" style={{ color: 'var(--color-primary)' }}>{(r.score * 100).toFixed(1)}%</span>
+                </div>
+                <div className="leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{r.content.slice(0, 200)}</div>
               </div>
-              <div className="leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{r.content.slice(0, 200)}...</div>
-            </div>
-          ))}
-        </div>
-      )}
-      {results.length === 0 && !searching && query && (
-        <div className="text-xs py-2" style={{ color: 'var(--color-text-3)' }}>无结果</div>
-      )}
+            ))}
+          </div>
+        )}
+
+        {/* 无结果 */}
+        {!searching && results && results.length === 0 && (
+          <div className="text-sm py-8 text-center" style={{ color: 'var(--color-text-3)' }}>未找到匹配结果</div>
+        )}
+
+        {/* 初始空状态 */}
+        {!searching && results === null && (
+          <div className="text-sm py-8 text-center" style={{ color: 'var(--color-text-3)' }}>输入查询关键词进行检索测试</div>
+        )}
+      </div>
     </div>
   );
 }

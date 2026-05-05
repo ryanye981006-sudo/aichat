@@ -5,7 +5,7 @@ import { getDb } from '../db/connection.js';
 import { config } from '../config.js';
 import { knowledgeService } from '../services/KnowledgeService.js';
 import { processingQueue } from '../services/ProcessingQueue.js';
-import { upload } from '../services/FileStorage.js';
+import { upload, fixFileNameEncoding } from '../services/FileStorage.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
@@ -129,9 +129,10 @@ router.post('/:id/documents', upload.single('file'), async (req, res) => {
     }
 
     const docId = uuidv4();
+    const originalName = fixFileNameEncoding(req.file.originalname);
     db.prepare(
       'INSERT INTO knowledge_documents (id, knowledge_base_id, source_type, file_path, file_name) VALUES (?, ?, ?, ?, ?)'
-    ).run(docId, req.params.id, 'file', req.file.filename, req.file.originalname);
+    ).run(docId, req.params.id, 'file', req.file.filename, originalName);
 
     const doc = db.prepare('SELECT * FROM knowledge_documents WHERE id = ?').get(docId);
 
