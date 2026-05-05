@@ -77,7 +77,11 @@ export const knowledgeApi = {
   uploadDocument: (kbId: string, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
-    return fetch(`${BASE_URL}/knowledge/${kbId}/documents`, { method: 'POST', body: formData }).then(r => r.json());
+    return fetch(`${BASE_URL}/knowledge/${kbId}/documents`, { method: 'POST', body: formData }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || '上传失败');
+      return data;
+    });
   },
   deleteDocument: (kbId: string, docId: string) =>
     request<any>(`/knowledge/${kbId}/documents/${docId}`, { method: 'DELETE' }),
@@ -99,7 +103,9 @@ export function chatSSE(
     onDone: (messageId: string, content: string, thoughtProcess: string | null, metrics?: any, aborted?: boolean) => void;
     onError: (error: string) => void;
     onReasoning?: (token: string) => void;
-  }
+    onStatus?: (message: string) => void;
+  },
+  kbIds?: string[],
 ): AbortController {
   const controller = new AbortController();
 
@@ -111,6 +117,7 @@ export function chatSSE(
       conversation_id: conversationId,
       message,
       thinking_mode: thinkingMode,
+      kb_ids: kbIds,
     }),
     signal: controller.signal,
   }).then(async (response) => {
@@ -145,6 +152,9 @@ export function chatSSE(
           switch (data.type) {
             case 'meta':
               callbacks.onMeta(data.conversation_id, data.citations);
+              break;
+            case 'status':
+              callbacks.onStatus?.(data.message);
               break;
             case 'token':
               callbacks.onToken(data.content);
@@ -187,7 +197,9 @@ export function regenerateSSE(
     onError: (error: string) => void;
     onReasoning?: (token: string) => void;
     onMeta?: (conversationId: string, citations?: any[]) => void;
-  }
+    onStatus?: (message: string) => void;
+  },
+  kbIds?: string[],
 ): AbortController {
   const controller = new AbortController();
 
@@ -199,6 +211,7 @@ export function regenerateSSE(
       conversation_id: conversationId,
       message_id: messageId,
       thinking_mode: thinkingMode,
+      kb_ids: kbIds,
     }),
     signal: controller.signal,
   }).then(async (response) => {
@@ -233,6 +246,9 @@ export function regenerateSSE(
           switch (data.type) {
             case 'meta':
               callbacks.onMeta?.(data.conversation_id, data.citations);
+              break;
+            case 'status':
+              callbacks.onStatus?.(data.message);
               break;
             case 'token':
               callbacks.onToken(data.content);

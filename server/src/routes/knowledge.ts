@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { getDb } from '../db/connection.js';
 import { config } from '../config.js';
 import { knowledgeService } from '../services/KnowledgeService.js';
@@ -18,10 +19,20 @@ const KB_FIELDS = [
   'rerank_provider_id', 'rerank_model_id',
 ];
 
-// 获取所有知识库
+// 获取所有知识库（含文档计数）
 router.get('/', (_req, res) => {
   const db = getDb();
-  const kbs = db.prepare('SELECT * FROM knowledge_bases ORDER BY created_at DESC').all();
+  const kbs = db.prepare(
+    `SELECT kb.*, COALESCE(doc_stats.doc_count, 0) AS document_count
+     FROM knowledge_bases kb
+     LEFT JOIN (
+       SELECT knowledge_base_id, COUNT(*) AS doc_count
+       FROM knowledge_documents
+       WHERE processing_status = 'completed'
+       GROUP BY knowledge_base_id
+     ) doc_stats ON doc_stats.knowledge_base_id = kb.id
+     ORDER BY kb.created_at DESC`
+  ).all();
   res.json(kbs);
 });
 
@@ -110,12 +121,17 @@ router.delete('/:id', (req, res) => {
 router.get('/:id/documents', (req, res) => {
   const db = getDb();
   const docs = db.prepare(
-    'SELECT * FROM knowledge_documents WHERE knowledge_base_id = ? ORDER BY created_at DESC'
+    `SELECT kd.*, COALESCE(SUM(kc.recall_count), 0) AS recall_count
+     FROM knowledge_documents kd
+     LEFT JOIN knowledge_chunks kc ON kc.document_id = kd.id
+     WHERE kd.knowledge_base_id = ?
+     GROUP BY kd.id
+     ORDER BY kd.created_at DESC`
   ).all(req.params.id);
   res.json(docs);
 });
 
-// 上传文档（使用并发队列）
+// 上传文档（使用并发队列，含文件哈希去重）
 router.post('/:id/documents', upload.single('file'), async (req, res) => {
   try {
     const db = getDb();
@@ -128,11 +144,27 @@ router.post('/:id/documents', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: '请上传文件' });
     }
 
+    // 计算文件哈希
+    const filePath = path.join(config.uploadsDir, req.file.filename);
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+    // 检查同一知识库下是否已存在相同哈希的文件
+    const existing = db.prepare(
+      'SELECT * FROM knowledge_documents WHERE knowledge_base_id = ? AND file_hash = ?'
+    ).get(req.params.id, fileHash) as any;
+
+    if (existing) {
+      // 删除刚上传的重复文件
+      try { fs.unlinkSync(filePath); } catch { /* 忽略 */ }
+      return res.status(409).json({ error: `文件已存在：${existing.file_name}` });
+    }
+
     const docId = uuidv4();
     const originalName = fixFileNameEncoding(req.file.originalname);
     db.prepare(
-      'INSERT INTO knowledge_documents (id, knowledge_base_id, source_type, file_path, file_name) VALUES (?, ?, ?, ?, ?)'
-    ).run(docId, req.params.id, 'file', req.file.filename, originalName);
+      'INSERT INTO knowledge_documents (id, knowledge_base_id, source_type, file_path, file_name, file_hash) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(docId, req.params.id, 'file', req.file.filename, originalName, fileHash);
 
     const doc = db.prepare('SELECT * FROM knowledge_documents WHERE id = ?').get(docId);
 
@@ -156,6 +188,9 @@ router.delete('/:id/documents/:docId', (req, res) => {
     if (!doc) {
       return res.status(404).json({ error: '文档不存在' });
     }
+
+    // 取消正在进行的异步处理（队列等待的移除，运行中的后续步骤会跳过）
+    processingQueue.cancel(req.params.docId);
 
     // 删除上传文件
     if (doc.file_path) {
@@ -192,6 +227,7 @@ router.get('/:id/documents/:docId/chunks', (req, res) => {
     chunk_index: c.chunk_index,
     content: c.content,
     metadata: c.metadata ? JSON.parse(c.metadata) : null,
+    recall_count: c.recall_count || 0,
     created_at: c.created_at,
   })));
 });
@@ -205,6 +241,25 @@ router.post('/:id/search', async (req, res) => {
     }
     const results = await knowledgeService.search([req.params.id], query, topK, threshold);
     res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 获取上传文件（在线查看/下载）
+router.get('/files/:docId', (req, res) => {
+  try {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM knowledge_documents WHERE id = ?').get(req.params.docId) as any;
+    if (!doc || !doc.file_path) {
+      return res.status(404).json({ error: '文件不存在' });
+    }
+    const filePath = path.join(config.uploadsDir, doc.file_path);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: '文件不存在' });
+    }
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.file_name)}`);
+    res.sendFile(filePath);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

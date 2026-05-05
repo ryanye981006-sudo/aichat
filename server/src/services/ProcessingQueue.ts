@@ -7,6 +7,7 @@ export class ProcessingQueue {
   private maxConcurrent: number;
   private queue: { docId: string; resolve: () => void; reject: (err: Error) => void }[] = [];
   private processingIds = new Set<string>();
+  private cancelledIds = new Set<string>();
 
   constructor(maxConcurrent = 3) {
     this.maxConcurrent = maxConcurrent;
@@ -16,6 +17,8 @@ export class ProcessingQueue {
   async enqueue(docId: string): Promise<void> {
     // 防重复处理
     if (this.processingIds.has(docId)) return;
+    // 已取消的不再入队
+    if (this.cancelledIds.has(docId)) return;
 
     if (this.running < this.maxConcurrent) {
       this.startProcessing(docId);
@@ -26,6 +29,22 @@ export class ProcessingQueue {
     return new Promise<void>((resolve, reject) => {
       this.queue.push({ docId, resolve, reject });
     });
+  }
+
+  // 取消处理（正在运行的无法中断，但会跳过后续步骤）
+  cancel(docId: string): void {
+    this.cancelledIds.add(docId);
+    // 如果还在队列中，直接移除
+    const idx = this.queue.findIndex(item => item.docId === docId);
+    if (idx !== -1) {
+      this.queue[idx].resolve();
+      this.queue.splice(idx, 1);
+    }
+  }
+
+  // 检查是否已取消
+  isCancelled(docId: string): boolean {
+    return this.cancelledIds.has(docId);
   }
 
   // 获取队列状态
@@ -57,6 +76,7 @@ export class ProcessingQueue {
   private onComplete(docId: string): void {
     this.running--;
     this.processingIds.delete(docId);
+    this.cancelledIds.delete(docId);
 
     // 从队列取下一个
     this.dequeue();

@@ -34,6 +34,12 @@ export class KnowledgeService {
     const kb = db.prepare('SELECT * FROM knowledge_bases WHERE id = ?').get(doc.knowledge_base_id) as any;
     if (!kb) throw new Error('知识库不存在');
 
+    // 检查文档是否已被删除（处理过程中可能被用户删除）
+    const ensureExists = (): void => {
+      const exists = db.prepare('SELECT id FROM knowledge_documents WHERE id = ?').get(documentId);
+      if (!exists) throw new Error('文档已被删除，处理中止');
+    };
+
     // 构建处理配置快照
     const processingConfig = {
       chunk_strategy: kb.chunk_strategy || 'recursive',
@@ -47,6 +53,7 @@ export class KnowledgeService {
     try {
       // Step 1: 加载文本
       db.prepare("UPDATE knowledge_documents SET processing_status = 'loading', updated_at = datetime('now') WHERE id = ?").run(documentId);
+      ensureExists();
 
       let text: string;
       switch (doc.source_type) {
@@ -62,15 +69,18 @@ export class KnowledgeService {
         default:
           throw new Error(`不支持的来源类型: ${doc.source_type}`);
       }
+      ensureExists();
 
       // Step 2: 分块（使用 KB 配置的分块策略）
       db.prepare("UPDATE knowledge_documents SET processing_status = 'chunking', updated_at = datetime('now') WHERE id = ?").run(documentId);
+      ensureExists();
 
       const strategy = (kb.chunk_strategy || 'recursive') as 'paragraph' | 'sentence' | 'recursive';
       const chunks = chunkText(text, kb.chunk_size, kb.chunk_overlap, strategy);
 
       // Step 3: 批量嵌入并存储（含元数据）
       db.prepare("UPDATE knowledge_documents SET processing_status = 'embedding', updated_at = datetime('now') WHERE id = ?").run(documentId);
+      ensureExists();
 
       // 删除旧的分块
       db.prepare('DELETE FROM knowledge_chunks WHERE document_id = ?').run(documentId);
@@ -103,6 +113,7 @@ export class KnowledgeService {
       } else {
         embeddings = await embeddingService.embedBatch(chunks);
       }
+      ensureExists();
 
       // 构建分块元数据
       const chunkMetadata = {
@@ -120,6 +131,7 @@ export class KnowledgeService {
       );
 
       const transaction = db.transaction(() => {
+        ensureExists();
         for (let i = 0; i < chunks.length; i++) {
           insertChunk.run(
             uuidv4(),
@@ -135,28 +147,35 @@ export class KnowledgeService {
       transaction();
 
       // Step 4: 完成，记录处理配置
-      db.prepare(
+      const updated = db.prepare(
         "UPDATE knowledge_documents SET processing_status = 'completed', chunk_count = ?, processing_config = ?, updated_at = datetime('now') WHERE id = ?"
       ).run(chunks.length, JSON.stringify(processingConfig), documentId);
+      if (updated.changes === 0) return; // 文档已被删除，静默退出
 
     } catch (err) {
       const msg = (err as Error).message;
-      db.prepare(
-        "UPDATE knowledge_documents SET processing_status = 'error', error_message = ?, updated_at = datetime('now') WHERE id = ?"
-      ).run(msg, documentId);
+      // 仅当文档还存在时记录错误
+      const exists = db.prepare('SELECT id FROM knowledge_documents WHERE id = ?').get(documentId);
+      if (exists) {
+        db.prepare(
+          "UPDATE knowledge_documents SET processing_status = 'error', error_message = ?, updated_at = datetime('now') WHERE id = ?"
+        ).run(msg, documentId);
+      }
       throw err;
     }
   }
 
   // 搜索知识库（按嵌入配置分组，每组独立向量化查询，合并结果）
   // 支持查询改写：传入 assistantProviderId + assistantModelId 以启用 LLM 改写
+  // trackRecalls: 是否递增召回计数（搜索测试不计数，实际 RAG 调用才计数）
   async search(
     knowledgeBaseIds: string[],
     query: string,
     topK?: number,
     threshold?: number,
     assistantProviderId?: string,
-    assistantModelId?: string
+    assistantModelId?: string,
+    trackRecalls: boolean = false,
   ): Promise<SearchResult[]> {
     if (!knowledgeBaseIds.length) return [];
 
@@ -171,6 +190,8 @@ export class KnowledgeService {
     const k = topK || kbs[0].search_top_k || 5;
     const th = threshold || kbs[0].similarity_threshold || 0.7;
 
+    const t0 = Date.now();
+
     // 查询改写：任一 KB 启用了改写，且有助手模型可用时执行
     const shouldRewrite = kbs.some((kb: any) => kb.enable_query_rewrite)
       && assistantProviderId && assistantModelId;
@@ -178,6 +199,9 @@ export class KnowledgeService {
     const queries = shouldRewrite
       ? await rewriteQuery(query, assistantProviderId!, assistantModelId!)
       : [query];
+    if (shouldRewrite) {
+      console.log(`[KnowledgeService] 查询改写耗时 ${Date.now() - t0}ms，改写为 ${queries.length} 个查询: ${JSON.stringify(queries)}`);
+    }
 
     // 辅助函数：获取 KB 的实际嵌入配置
     const resolveEmbedConfig = (kb: any): EmbedGroupKey | null => {
@@ -214,51 +238,66 @@ export class KnowledgeService {
 
     if (groups.size === 0) return [];
 
-    // 对每个改写后的查询分别搜索，合并去重
+    // 并行检索：先预加载各组 chunks，再批量嵌入查询，避免串行 API 调用 + 重复 DB 读取
     const seenChunks = new Set<string>();
     const allResults: SearchResult[] = [];
 
-    for (const q of queries) {
-      for (const [, group] of groups) {
-        try {
-          // 生成该组的查询向量
-          const { embedding: queryVec } = await embeddingService.embedWith(
-            q, group.key.providerId, group.key.modelName
-          );
+    // 1. 预加载所有组的 chunks，并预先解析嵌入向量（避免每个 query 重复 JSON.parse）
+    const groupChunks = new Map<string, { id: string; content: string; emb: number[]; metadata: any; fileName: string }[]>();
+    for (const [gkey, group] of groups) {
+      const placeholders = group.kbIds.map(() => '?').join(',');
+      const rows = db.prepare(
+        `SELECT kc.id, kc.content, kc.embedding, kc.metadata, kd.file_name
+         FROM knowledge_chunks kc
+         JOIN knowledge_documents kd ON kc.document_id = kd.id
+         WHERE kc.knowledge_base_id IN (${placeholders})
+         AND kd.processing_status = 'completed'`
+      ).all(...group.kbIds) as any[];
+      groupChunks.set(gkey, rows.map((r: any) => ({
+        id: r.id,
+        content: r.content,
+        emb: JSON.parse(r.embedding || '[]'),
+        metadata: r.metadata ? JSON.parse(r.metadata) : null,
+        fileName: r.file_name,
+      })));
+    }
 
-          // 查询该组所有 KB 的 chunks
-          const placeholders = group.kbIds.map(() => '?').join(',');
-          const chunks = db.prepare(
-            `SELECT kc.id, kc.content, kc.embedding, kc.metadata, kd.file_name
-             FROM knowledge_chunks kc
-             JOIN knowledge_documents kd ON kc.document_id = kd.id
-             WHERE kc.knowledge_base_id IN (${placeholders})
-             AND kd.processing_status = 'completed'`
-          ).all(...group.kbIds) as any[];
+    // 2. 对每个组批量嵌入所有查询（一次 API 调用 / 组），然后计算余弦相似度
+    for (const [gkey, group] of groups) {
+      try {
+        const queryVecs = await embeddingService.embedBatchWith(
+          queries, group.key.providerId, group.key.modelName
+        );
+        const chunks = groupChunks.get(gkey)!;
 
+        for (let qi = 0; qi < queries.length; qi++) {
+          const queryVec = queryVecs[qi].embedding;
           for (const c of chunks) {
             if (seenChunks.has(c.id)) continue;
-            const emb = JSON.parse(c.embedding || '[]');
-            const score = emb.length > 0 ? cosineSimilarity(queryVec, emb) : 0;
+            const score = c.emb.length > 0 ? cosineSimilarity(queryVec, c.emb) : 0;
             if (score >= th) {
               seenChunks.add(c.id);
               allResults.push({
                 content: c.content,
                 score,
-                documentName: c.file_name,
+                documentName: c.fileName,
                 chunkId: c.id,
-                metadata: c.metadata ? JSON.parse(c.metadata) : null,
+                metadata: c.metadata,
               });
             }
           }
-        } catch (err) {
-          console.error(`[KnowledgeService] 嵌入组 [${groupKey(group.key)}] 搜索失败:`, err);
-          // 该组失败不影响其他组
         }
+      } catch (err) {
+        console.error(`[KnowledgeService] 嵌入组 [${groupKey(group.key)}] 搜索失败:`, err);
       }
     }
 
-    // 初步排序
+    const t1 = Date.now();
+    if (shouldRewrite) {
+      console.log(`[KnowledgeService] 嵌入+检索耗时 ${t1 - t0}ms（含改写），候选 ${allResults.length} 条`);
+    }
+
+    // 初始排序（重排序后再截断）
     let sorted = allResults.sort((a, b) => b.score - a.score);
 
     // 重排序：任一 KB 启用了 rerank 且有配置时执行
@@ -267,14 +306,26 @@ export class KnowledgeService {
       // 从 models 表查找实际的模型名称（kb.rerank_model_id 是 UUID）
       const rerankModel = db.prepare('SELECT name FROM models WHERE id = ?').get(rerankKb.rerank_model_id) as any;
       if (rerankModel) {
+        const tRerank = Date.now();
         const recallSize = Math.min(sorted.length, k * 3); // 召回更多候选
         const candidates = sorted.slice(0, recallSize);
         sorted = await rerankerService.rerank(
           query, candidates, rerankKb.rerank_provider_id, rerankModel.name, k
         );
+        console.log(`[KnowledgeService] 重排序耗时 ${Date.now() - tRerank}ms`);
       }
     } else {
       sorted = sorted.slice(0, k);
+    }
+
+    // 递增最终返回的分块召回计数（搜索测试不计入）
+    if (trackRecalls && sorted.length > 0) {
+      const incrementRecall = db.prepare(
+        'UPDATE knowledge_chunks SET recall_count = recall_count + 1 WHERE id = ?'
+      );
+      for (const r of sorted) {
+        incrementRecall.run(r.chunkId);
+      }
     }
 
     return sorted;

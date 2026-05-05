@@ -7,3 +7,7 @@ coverage/
 .env*
 !.env.example
 data/*.db*
+data/eval/
+uploads/
+scripts/eval/
+server/src/eval/

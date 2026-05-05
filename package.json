@@ -9,7 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "eval": "tsx server/src/eval/cli.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.45",

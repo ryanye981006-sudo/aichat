@@ -1,6 +1,7 @@
 // 重排序服务：使用 OpenAI 兼容 /v1/rerank API 对初步检索结果精排
 // 失败时降级到原始余弦相似度排序
 import { getDb } from '../db/connection.js';
+import { getPreferredUrl, getFallbackUrl, markSuccess } from '../services/ApiUrlCache.js';
 
 export interface RerankInput {
   content: string;
@@ -40,46 +41,42 @@ export class RerankerService {
         return this.fallbackSort(documents, topN);
       }
 
-      // 调用 /v1/rerank API（Cohere/Jina/VoyageAI 均兼容）
-      const url = `${provider.base_url}/v1/rerank`;
-      const response = await fetch(url, {
-        method: 'POST',
+      const body = JSON.stringify({
+        model: modelName,
+        query,
+        documents: documents.map(d => d.content),
+        top_n: topN,
+      });
+      const fetchOptions = (signal: AbortSignal) => ({
+        method: 'POST' as const,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${provider.api_key}`,
         },
-        body: JSON.stringify({
-          model: modelName,
-          query,
-          documents: documents.map(d => d.content),
-          top_n: topN,
-        }),
+        body,
+        signal,
       });
 
-      if (!response.ok) {
-        // 尝试不带 /v1 的路径
-        const url2 = `${provider.base_url}/rerank`;
-        const response2 = await fetch(url2, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.api_key}`,
-          },
-          body: JSON.stringify({
-            model: modelName,
-            query,
-            documents: documents.map(d => d.content),
-            top_n: topN,
-          }),
-        });
+      // 优先使用缓存的已验证 URL，避免每次 fallback 重试
+      const preferredUrl = getPreferredUrl(provider.id, 'rerank', provider.base_url);
+      let response = await fetch(preferredUrl, fetchOptions(AbortSignal.timeout(10000)));
 
-        if (!response2.ok) {
-          const errText = await response2.text();
-          console.warn(`[Reranker] Rerank API 调用失败 (${response2.status}): ${errText.slice(0, 200)}，降级到原始排序`);
-          return this.fallbackSort(documents, topN);
+      if (response.ok) {
+        markSuccess(provider.id, 'rerank', preferredUrl);
+      } else {
+        const fallbackUrl = getFallbackUrl(provider.id, 'rerank', provider.base_url);
+        if (fallbackUrl !== preferredUrl) {
+          response = await fetch(fallbackUrl, fetchOptions(AbortSignal.timeout(10000)));
+          if (response.ok) {
+            markSuccess(provider.id, 'rerank', fallbackUrl);
+          }
         }
+      }
 
-        return this.parseResponse(response2, documents, topN);
+      if (!response.ok) {
+        const errText = await response.text();
+        console.warn(`[Reranker] Rerank API 调用失败 (${response.status}): ${errText.slice(0, 200)}，降级到原始排序`);
+        return this.fallbackSort(documents, topN);
       }
 
       return this.parseResponse(response, documents, topN);

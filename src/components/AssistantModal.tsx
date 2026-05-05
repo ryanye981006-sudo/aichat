@@ -43,22 +43,15 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
   // 知识库关联
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
-  const [kbLoaded, setKbLoaded] = useState(false);
 
-  // 加载知识库列表（切换到知识库 tab 时）
-  const loadKnowledgeBases = async () => {
-    if (kbLoaded) return;
-    try {
-      const kbs = await knowledgeApi.list();
-      setKnowledgeBases(kbs as KnowledgeBase[]);
-      setKbLoaded(true);
-    } catch (err) {
-      console.error('加载知识库列表失败:', err);
-    }
-  };
+  // 仅显示已处理完成的知识库（有分块才能检索）
+  const availableKbs = knowledgeBases.filter(kb => kb.document_count > 0);
 
   useEffect(() => {
     if (isOpen) {
+      // 加载知识库列表
+      knowledgeApi.list().then(kbs => setKnowledgeBases(kbs as KnowledgeBase[])).catch(() => {});
+
       if (assistant) {
         setName(assistant.name);
         setSystemPrompt(assistant.system_prompt);
@@ -93,7 +86,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
       }
       setActiveTab('prompt');
       setShowEmojiPicker(false);
-      setKbLoaded(false);
     }
   }, [assistant, isOpen, providers]);
 
@@ -358,7 +350,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
 
               {activeTab === 'knowledge' && (
                 <div className="space-y-5">
-                  {(() => { loadKnowledgeBases(); return null; })()}
                   <div>
                     <label className="block text-sm font-bold mb-3" style={{ color: 'var(--color-text)' }}>
                       关联知识库
@@ -366,14 +357,14 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                     <div className="text-xs mb-3" style={{ color: 'var(--color-text-3)' }}>
                       选中的知识库将在对话时自动检索相关内容，注入到系统提示词中
                     </div>
-                    {knowledgeBases.length === 0 ? (
+                    {availableKbs.length === 0 ? (
                       <div className="text-sm py-6 text-center rounded-xl border"
                         style={{ color: 'var(--color-text-3)', borderColor: 'var(--color-border)', borderStyle: 'dashed' }}>
-                        暂无知识库，请先在设置中创建知识库
+                        暂无已处理完成的知识库
                       </div>
                     ) : (
                       <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                        {knowledgeBases.map(kb => {
+                        {availableKbs.map(kb => {
                           const isSelected = selectedKbIds.includes(kb.id);
                           return (
                             <label

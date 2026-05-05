@@ -94,6 +94,7 @@ export class AiSdkService {
     callbacks: StreamCallbacks,
     abortSignal?: AbortSignal,
     thinkingMode?: string,
+    requestStartTime?: number,  // RAG 场景下从请求入口传入，确保 TTFT 包含检索耗时
   ): Promise<void> {
     const db = getDb()
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
@@ -117,7 +118,7 @@ export class AiSdkService {
     let streamResult: any = null
 
     try {
-      const startTime = Date.now()
+      const startTime = requestStartTime ?? Date.now()
       let firstTokenTime = 0
       let fullText = ''
 
@@ -227,7 +228,8 @@ export class AiSdkService {
     messages: ChatMessage[],
     modelId: string,
     providerId: string,
-    temperature: number = 0.3
+    temperature: number = 0.3,
+    abortSignal?: AbortSignal,
   ): Promise<string> {
     const db = getDb()
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
@@ -244,6 +246,7 @@ export class AiSdkService {
       model: createModel(provider, model),
       messages,
       temperature,
+      abortSignal,
     })
 
     return result.text
@@ -365,6 +368,7 @@ export class AiSdkService {
       headers: {
         'Authorization': `Bearer ${provider.api_key}`,
       },
+      signal: AbortSignal.timeout(15000),
     })
 
     if (!response.ok) {

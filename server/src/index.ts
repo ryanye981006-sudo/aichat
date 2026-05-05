@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { createServer } from 'http';
 import { config } from './config.js';
 import { getDb, closeDb } from './db/connection.js';
 
@@ -36,27 +37,43 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', version: '1.0.0' });
 });
 
-// 启动
-const server = app.listen(config.port, () => {
-  console.log(`[Server] aichat API 已启动: http://localhost:${config.port}`);
-  console.log(`[Server] 数据库: ${config.dbPath}`);
-});
+let server: ReturnType<typeof createServer>;
 
-// 优雅关闭
-process.on('SIGTERM', () => {
-  console.log('[Server] 正在关闭...');
-  server.close(() => {
-    closeDb();
-    process.exit(0);
-  });
-});
+function startServer(retries = 10) {
+  server = createServer(app);
 
-process.on('SIGINT', () => {
-  console.log('[Server] 正在关闭...');
-  server.close(() => {
-    closeDb();
-    process.exit(0);
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && retries > 0) {
+      const delay = Math.min(1000 * Math.pow(1.5, 10 - retries), 8000);
+      console.log(`[Server] 端口 ${config.port} 被占用，${Math.round(delay / 1000)}秒后重试 (剩余 ${retries - 1} 次)...`);
+      setTimeout(() => {
+        server.close();
+        startServer(retries - 1);
+      }, delay);
+      return;
+    }
+    throw err;
   });
-});
+
+  server.listen(config.port, () => {
+    console.log(`[Server] aichat API 已启动: http://localhost:${config.port}`);
+    console.log(`[Server] 数据库: ${config.dbPath}`);
+  });
+}
+
+startServer();
+
+function shutdown(signal: string) {
+  console.log(`[Server] 收到 ${signal}，正在关闭...`);
+  try { closeDb(); } catch {}
+  if (server) {
+    server.close(() => process.exit(0));
+  }
+  // 兜底：1 秒后强制退出（比原来更快，让 tsx watch 更快拿到端口）
+  setTimeout(() => process.exit(0), 1000);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 export default app;

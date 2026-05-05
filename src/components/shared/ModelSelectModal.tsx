@@ -24,16 +24,21 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
     );
   }, [models, search]);
 
-  // 按供应商分组
+  // 按供应商分组（供应商顺序与传入的 providers 列表一致，模型按名称排序）
   const grouped = useMemo(() => {
-    const map = new Map<string, { provider: Provider; models: Model[] }>();
+    const map = new Map<string, Model[]>();
     for (const m of filteredModels) {
-      const p = providers.find(pr => pr.id === m.provider_id);
-      if (!p) continue;
-      if (!map.has(p.id)) map.set(p.id, { provider: p, models: [] });
-      map.get(p.id)!.models.push(m);
+      if (!map.has(m.provider_id)) map.set(m.provider_id, []);
+      map.get(m.provider_id)!.push(m);
     }
-    return Array.from(map.values());
+    // 组内按名称排序
+    for (const groupModels of map.values()) {
+      groupModels.sort((a, b) => a.name.localeCompare(b.name));
+    }
+    // 按 providers 的顺序输出分组
+    return providers
+      .filter(p => map.has(p.id))
+      .map(p => ({ provider: p, models: map.get(p.id)! }));
   }, [filteredModels, providers]);
 
   if (!isOpen) return null;

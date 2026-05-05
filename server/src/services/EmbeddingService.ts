@@ -3,6 +3,7 @@
 import { getDb } from '../db/connection.js';
 import { config } from '../config.js';
 import { embeddingCache } from './EmbeddingCache.js';
+import { getPreferredUrl, getFallbackUrl, markSuccess } from './ApiUrlCache.js';
 
 export interface EmbeddingResult {
   embedding: number[];
@@ -203,36 +204,40 @@ export class EmbeddingService {
     throw lastError!;
   }
 
-  // 实际 HTTP 调用
+  // 实际 HTTP 调用，使用 URL 缓存避免每次 fallback 重试
   private async _doCall(
     provider: any,
     modelName: string,
     inputs: string[],
     isBatch: boolean
   ): Promise<EmbeddingResult[]> {
-    const url1 = `${provider.base_url}/v1/embeddings`;
     const body = JSON.stringify({ model: modelName, input: inputs.length === 1 && !isBatch ? inputs[0] : inputs });
 
-    let response = await fetch(url1, {
-      method: 'POST',
+    const fetchOptions = (signal: AbortSignal) => ({
+      method: 'POST' as const,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${provider.api_key}`,
       },
       body,
+      signal,
     });
 
-    // 如果 /v1/embeddings 失败，尝试不带 v1 的路径
-    if (!response.ok) {
-      const url2 = `${provider.base_url}/embeddings`;
-      response = await fetch(url2, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${provider.api_key}`,
-        },
-        body,
-      });
+    // 优先使用缓存的已验证 URL
+    const preferredUrl = getPreferredUrl(provider.id, 'embeddings', provider.base_url);
+    let response = await fetch(preferredUrl, fetchOptions(AbortSignal.timeout(10000)));
+
+    if (response.ok) {
+      markSuccess(provider.id, 'embeddings', preferredUrl);
+    } else {
+      // 缓存失效或首次调用，尝试备选路径
+      const fallbackUrl = getFallbackUrl(provider.id, 'embeddings', provider.base_url);
+      if (fallbackUrl !== preferredUrl) {
+        response = await fetch(fallbackUrl, fetchOptions(AbortSignal.timeout(10000)));
+        if (response.ok) {
+          markSuccess(provider.id, 'embeddings', fallbackUrl);
+        }
+      }
     }
 
     if (!response.ok) {

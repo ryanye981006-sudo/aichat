@@ -38,6 +38,7 @@ export async function rewriteQuery(
       modelId,
       providerId,
       0.1,
+      AbortSignal.timeout(5000),
     );
 
     // 提取 JSON 数组：去除可能的 markdown 代码块标记
@@ -53,7 +54,7 @@ export async function rewriteQuery(
     const rewritten: unknown = JSON.parse(jsonMatch[0]);
     if (Array.isArray(rewritten) && rewritten.length > 0 &&
         rewritten.every(item => typeof item === 'string' && item.trim())) {
-      return rewritten.map((s: string) => s.trim());
+      return rewritten.map((s: string) => s.trim()).slice(0, 3);
     }
 
     console.warn('[rewriteQuery] JSON 解析结果格式异常，降级到原始查询');

@@ -64,6 +64,7 @@ export interface Message {
   model_name?: string | null;
   provider_name?: string | null;
   metrics?: MessageMetrics | null;
+  citations?: any[] | null;
   aborted?: boolean;
   created_at: string;
   isStreaming?: boolean;
@@ -94,6 +95,7 @@ export interface KnowledgeBase {
   enable_rerank: number;
   rerank_provider_id: string | null;
   rerank_model_id: string | null;
+  document_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -106,6 +108,7 @@ export interface KnowledgeDocument {
   file_name: string;
   processing_status: 'pending' | 'loading' | 'chunking' | 'embedding' | 'completed' | 'error';
   chunk_count: number;
+  recall_count: number;
   error_message: string | null;
   processing_config: string | null;
   created_at: string;

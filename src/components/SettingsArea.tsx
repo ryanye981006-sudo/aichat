@@ -2,7 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model, KnowledgeBase, KnowledgeDocument, MemorySettings, MemoryEntry } from '../types';
 import { cn } from '../lib/utils';
 import { providersApi, modelsApi, knowledgeApi, memoryApi } from '../services/api';
-import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil } from 'lucide-react';
+import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil, ExternalLink } from 'lucide-react';
+import ModelSelectModal from './shared/ModelSelectModal';
+
+// 分块策略中文名
+function chunkStrategyLabel(s: string): string {
+  const map: Record<string, string> = {
+    recursive: '递归（段落→句子→强制截断）',
+    paragraph: '段落（仅按段落分割）',
+    sentence: '句子（按标点分割）',
+  };
+  return map[s] || s;
+}
 
 // ===== 通用 Toggle 组件 =====
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -78,6 +89,21 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
 
   // 当前选中的知识库对象
   const selectedKb = knowledgeBases.find(kb => kb.id === selectedKbId) || null;
+
+  // Toast 提示
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), 5000);
+  };
+
+  // 查看分段信息
+  const [viewingChunksDoc, setViewingChunksDoc] = useState<KnowledgeDocument | null>(null);
+  const [viewingChunks, setViewingChunks] = useState<any[]>([]);
+  const [loadingChunks, setLoadingChunks] = useState(false);
 
   // ===== 记忆状态 =====
   const [memorySettings, setMemorySettings] = useState<MemorySettings | null>(null);
@@ -237,7 +263,10 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const handleCreateKb = async (data: Partial<KnowledgeBase>) => {
     try {
       const kb = await knowledgeApi.create(data);
-      setKnowledgeBases(prev => [...prev, kb]);
+      setKnowledgeBases(prev => [kb, ...prev]);
+      setSelectedKbId(kb.id);
+      setDocuments([]);
+      setRightTab('files');
       setShowAddKb(false);
     } catch (e) { console.error(e); }
   };
@@ -297,11 +326,18 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     }
   }, [openKbMenuId]);
 
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
   const handleUploadDocument = async (kbId: string, file: File) => {
     try {
       await knowledgeApi.uploadDocument(kbId, file);
       await loadDocuments(kbId);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      showToast((e as Error).message || '上传失败');
+    } finally {
+      // 重置 file input，否则选中同一文件不会触发 onChange
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
+    }
   };
 
   const handleUpdateMemorySettings = async (updates: Partial<MemorySettings>) => {
@@ -321,6 +357,15 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
 
   return (
     <div className="flex-1 flex h-full overflow-hidden" style={{ backgroundColor: bgSoft }}>
+      {/* Toast 提示 */}
+      {toastMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium transition-all duration-300"
+          style={{ backgroundColor: 'var(--color-text)', color: 'var(--color-background)', opacity: toastMessage ? 1 : 0 }}>
+          <span>{toastMessage}</span>
+          <button onClick={() => setToastMessage(null)} className="ml-3 opacity-60 hover:opacity-100 transition-opacity">&times;</button>
+        </div>
+      )}
+
       {/* ===== 模型设置 Tab ===== */}
       {activeTab === 'model' && (
         <div className="flex h-full w-full overflow-hidden">
@@ -574,7 +619,7 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
             {selectedKbId ? (
               <>
                 {/* Tab 头部 */}
-                <div className="flex items-center gap-1 px-6 pt-4 pb-0 shrink-0">
+                <div className="shrink-0 border-b px-6 pt-4" style={{ borderColor }}>
                   <button onClick={() => setRightTab('files')}
                     className={cn("px-4 py-2 rounded-t-lg text-sm font-medium transition-colors",
                       rightTab === 'files' ? 'bg-white' : '')}
@@ -593,7 +638,6 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                     }}>
                     搜索测试
                   </button>
-                  <div className="flex-1 border-b" style={{ borderColor }} />
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
@@ -602,7 +646,7 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                       {/* 上传按钮 */}
                       <div className="flex items-center gap-3 mb-5">
                         <label className="relative cursor-pointer">
-                          <input type="file" className="hidden" accept=".pdf,.docx,.txt,.md" onChange={e => {
+                          <input ref={uploadInputRef} type="file" className="hidden" accept=".pdf,.docx,.txt,.md" onChange={e => {
                             const file = e.target.files?.[0];
                             if (file) handleUploadDocument(selectedKbId, file);
                           }} />
@@ -624,8 +668,9 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                               <th className="px-4 py-3 text-left font-medium">文件名称</th>
                               <th className="px-4 py-3 text-left font-medium w-20">状态</th>
                               <th className="px-4 py-3 text-left font-medium w-16">分块</th>
-                              <th className="px-4 py-3 text-left font-medium w-36">上传时间</th>
-                              <th className="px-4 py-3 text-left font-medium w-20">操作</th>
+                              <th className="px-4 py-3 text-left font-medium w-16">召回</th>
+                              <th className="px-4 py-3 text-left font-medium w-40">上传时间</th>
+                              <th className="px-4 py-3 text-left font-medium w-24">操作</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -634,27 +679,50 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                                 <td className="px-4 py-3.5">
                                   <div className="flex items-center gap-2">
                                     <FileText className="w-4 h-4" style={{ color: textSecondary }} />
-                                    <span style={{ color: textColor }}>{doc.file_name}</span>
+                                    <span
+                                      className="cursor-pointer hover:underline truncate"
+                                      style={{ color: primaryColor }}
+                                      onClick={() => {
+                                        setViewingChunksDoc(doc);
+                                        setViewingChunks([]);
+                                        setLoadingChunks(true);
+                                        knowledgeApi.getChunks(selectedKbId!, doc.id).then(setViewingChunks).finally(() => setLoadingChunks(false));
+                                      }}
+                                    >{doc.file_name}</span>
                                   </div>
                                 </td>
                                 <td className="px-4 py-3.5">
-                                  <span className={cn("text-xs px-2 py-0.5 rounded-full", doc.processing_status === 'completed' ? 'text-green-600 bg-green-50' : doc.processing_status === 'error' ? 'text-red-600 bg-red-50' : 'text-yellow-600 bg-yellow-50')}>
+                                  <span className={cn("text-xs px-2 py-0.5 rounded-full", doc.processing_status === 'completed' ? 'text-green-600 bg-green-50' : doc.processing_status === 'error' ? 'text-red-600 bg-red-50' : 'text-yellow-600 bg-yellow-50')}
+                                    title={doc.processing_status === 'error' ? doc.error_message || '未知错误' : undefined}>
                                     {doc.processing_status === 'completed' ? '已完成' : doc.processing_status === 'error' ? '失败' : '处理中'}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3.5" style={{ color: textSecondary }}>{doc.chunk_count}</td>
-                                <td className="px-4 py-3.5" style={{ color: textSecondary }}>{new Date(doc.created_at).toLocaleDateString()}</td>
+                                <td className="px-4 py-3.5" style={{ color: doc.recall_count > 0 ? primaryColor : textSecondary, fontWeight: doc.recall_count > 0 ? 600 : 400 }}>
+                                  {doc.recall_count || 0}
+                                </td>
+                                <td className="px-4 py-3.5" style={{ color: textSecondary }}>
+                                  {new Date(doc.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+                                </td>
                                 <td className="px-4 py-3.5">
-                                  <button onClick={() => handleDeleteDocument(doc.id)}
-                                    className="p-1 rounded transition-colors hover:bg-red-50" style={{ color: '#ef4444' }} title="删除文档">
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => window.open(`/api/knowledge/files/${doc.id}`, '_blank')}
+                                      className="p-1 rounded transition-colors hover:bg-black/10" title="查看文件"
+                                      style={{ color: primaryColor }}>
+                                      <ExternalLink className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button onClick={() => handleDeleteDocument(doc.id)}
+                                      className="p-1 rounded transition-colors hover:bg-red-50" style={{ color: '#ef4444' }} title="删除文档">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
                             {documents.length === 0 && (
                               <tr>
-                                <td colSpan={5} className="px-4 py-10 text-center" style={{ color: textSecondary }}>
+                                <td colSpan={6} className="px-4 py-10 text-center" style={{ color: textSecondary }}>
                                   暂无文档，请上传文件
                                 </td>
                               </tr>
@@ -800,11 +868,68 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
       {editingKb && (
         <AddKbModal
           initialData={editingKb}
+          hasDocuments={editingKb.id === selectedKbId && documents.length > 0}
           onClose={() => setEditingKb(null)}
           onSave={handleUpdateKb}
           providers={providers}
           models={models}
         />
+      )}
+
+      {/* 查看分段信息模态框 */}
+      {viewingChunksDoc && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-3xl max-h-[80vh] overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>分段详情</h3>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-3)' }}>{viewingChunksDoc.file_name} · {viewingChunksDoc.chunk_count} 个分块</p>
+              </div>
+              <button onClick={() => { setViewingChunksDoc(null); setViewingChunks([]); }} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {loadingChunks ? (
+                <div className="flex items-center justify-center py-12 gap-2" style={{ color: 'var(--color-text-3)' }}>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">加载分段信息...</span>
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead style={{ backgroundColor: 'var(--color-background-soft)' }}>
+                    <tr style={{ color: 'var(--color-text-2)' }}>
+                      <th className="px-3 py-2.5 text-left font-medium w-16">序号</th>
+                      <th className="px-3 py-2.5 text-left font-medium">内容</th>
+                      <th className="px-3 py-2.5 text-left font-medium w-16">召回</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewingChunks.map((c: any) => (
+                      <tr key={c.id} className="border-t transition-colors hover:bg-black/5" style={{ borderColor: 'var(--color-border)' }}>
+                        <td className="px-3 py-3 align-top" style={{ color: 'var(--color-text-3)' }}>{c.chunk_index + 1}</td>
+                        <td className="px-3 py-3">
+                          <div className="text-xs leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text)' }}>{c.content}</div>
+                          {c.metadata && (
+                            <div className="mt-2 pt-2 border-t text-[10px]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-3)' }}>
+                              嵌入模型: {c.metadata.embedding_model_name || '-'} · 维度: {c.metadata.embedding_dimension || '-'} · 分块策略: {chunkStrategyLabel(c.metadata.chunk_strategy)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 align-top" style={{ color: c.recall_count > 0 ? 'var(--color-primary)' : 'var(--color-text-3)', fontWeight: c.recall_count > 0 ? 600 : 400 }}>
+                          {c.recall_count || 0}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => { setViewingChunksDoc(null); setViewingChunks([]); }}
+                className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>关闭</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* 删除知识库确认弹窗 */}
@@ -1381,12 +1506,13 @@ function FetchModelsModal({
 }
 
 // ===== Add/Edit KB Modal (含高级设置) =====
-function AddKbModal({ onClose, onSave, providers, models, initialData }: {
+function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocuments }: {
   onClose: () => void;
   onSave: (data: Partial<KnowledgeBase>) => void;
   providers: Provider[];
   models: Model[];
   initialData?: KnowledgeBase | null;
+  hasDocuments?: boolean;
 }) {
   const isEdit = !!initialData;
   const [name, setName] = useState(initialData?.name || '');
@@ -1405,6 +1531,15 @@ function AddKbModal({ onClose, onSave, providers, models, initialData }: {
 
   const embModels = models.filter(m => m.provider_id === embProviderId);
   const rerankModels = models.filter(m => m.provider_id === rerankProviderId);
+
+  const [showEmbModelSelect, setShowEmbModelSelect] = useState(false);
+  const [showRerankModelSelect, setShowRerankModelSelect] = useState(false);
+
+  const selectedEmbModel = models.find(m => m.id === embModelId);
+  const selectedEmbProvider = providers.find(p => p.id === embProviderId);
+
+  const selectedRerankModel = models.find(m => m.id === rerankModelId);
+  const selectedRerankProvider = providers.find(p => p.id === rerankProviderId);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -1426,23 +1561,42 @@ function AddKbModal({ onClose, onSave, providers, models, initialData }: {
           {/* 嵌入模型选择 */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text)' }}>嵌入模型（可选）</label>
-            <select value={embProviderId} onChange={e => { setEmbProviderId(e.target.value); setEmbModelId(''); }}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none mb-2"
-              style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-              <option value="">使用全局默认嵌入模型</option>
-              {providers.filter(p => p.enabled).map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            {embProviderId && (
-              <select value={embModelId} onChange={e => setEmbModelId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-                style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                <option value="">选择模型</option>
-                {embModels.map(m => (
-                  <option key={m.id} value={m.id}>{m.display_name || m.name}</option>
-                ))}
-              </select>
+            {isEdit && hasDocuments ? (
+              <>
+                <div className="w-full px-3 py-2.5 rounded-lg border text-sm opacity-60"
+                  style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  {selectedEmbModel ? `${selectedEmbModel.display_name || selectedEmbModel.name} | ${selectedEmbProvider?.name || ''}` : '未设置'}
+                </div>
+                <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-3)' }}>
+                  知识库已包含文档，所有分块均使用同一嵌入模型，不可更改
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 px-3 py-2.5 rounded-lg border text-sm"
+                    style={{
+                      backgroundColor: 'var(--color-background-soft)',
+                      borderColor: 'var(--color-border)',
+                      color: embModelId ? 'var(--color-text)' : 'var(--color-text-3)',
+                    }}>
+                    {selectedEmbModel ? `${selectedEmbModel.display_name || selectedEmbModel.name} | ${selectedEmbProvider?.name || ''}` : '使用全局默认嵌入模型'}
+                  </div>
+                  <button type="button" onClick={() => setShowEmbModelSelect(true)}
+                    className="px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-black/5 shrink-0"
+                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
+                    选择模型
+                  </button>
+                </div>
+                <ModelSelectModal
+                  isOpen={showEmbModelSelect}
+                  onClose={() => setShowEmbModelSelect(false)}
+                  onSelect={(providerId, modelId) => { setEmbProviderId(providerId); setEmbModelId(modelId); }}
+                  providers={providers.filter(p => p.enabled)}
+                  models={models}
+                  currentModelId={embModelId}
+                />
+              </>
             )}
           </div>
 
@@ -1490,7 +1644,7 @@ function AddKbModal({ onClose, onSave, providers, models, initialData }: {
                     onChange={e => setSearchTopK(parseInt(e.target.value))} className="w-full" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>阈值: {similarityThreshold.toFixed(1)}</label>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>阈值: {similarityThreshold.toFixed(2)}</label>
                   <input type="range" min={0} max={1} step={0.05} value={similarityThreshold}
                     onChange={e => setSimilarityThreshold(parseFloat(e.target.value))} className="w-full" />
                 </div>
@@ -1510,24 +1664,29 @@ function AddKbModal({ onClose, onSave, providers, models, initialData }: {
                 </div>
                 {enableRerank && (
                   <>
-                    <select value={rerankProviderId} onChange={e => { setRerankProviderId(e.target.value); setRerankModelId(''); }}
-                      className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-                      style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                      <option value="">选择重排序供应商</option>
-                      {providers.filter(p => p.enabled).map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                    {rerankProviderId && (
-                      <select value={rerankModelId} onChange={e => setRerankModelId(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-                        style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                        <option value="">选择重排序模型</option>
-                        {rerankModels.map(m => (
-                          <option key={m.id} value={m.id}>{m.display_name || m.name}</option>
-                        ))}
-                      </select>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 px-3 py-2 rounded-lg border text-sm"
+                        style={{
+                          backgroundColor: 'var(--color-background-soft)',
+                          borderColor: 'var(--color-border)',
+                          color: rerankModelId ? 'var(--color-text)' : 'var(--color-text-3)',
+                        }}>
+                        {selectedRerankModel ? `${selectedRerankModel.display_name || selectedRerankModel.name} | ${selectedRerankProvider?.name || ''}` : '未选择重排序模型'}
+                      </div>
+                      <button type="button" onClick={() => setShowRerankModelSelect(true)}
+                        className="px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-black/5 shrink-0"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
+                        选择模型
+                      </button>
+                    </div>
+                    <ModelSelectModal
+                      isOpen={showRerankModelSelect}
+                      onClose={() => setShowRerankModelSelect(false)}
+                      onSelect={(providerId, modelId) => { setRerankProviderId(providerId); setRerankModelId(modelId); }}
+                      providers={providers.filter(p => p.enabled)}
+                      models={models}
+                      currentModelId={rerankModelId}
+                    />
                   </>
                 )}
               </div>
@@ -1655,14 +1814,15 @@ function SearchTestPanel({ kbId }: { kbId: string }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<any[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   const handleSearch = async () => {
     if (!query.trim() || searching) return;
     setSearching(true);
-    setResults(null); // 清除旧结果，显示 loading
+    setResults(null);
+    setExpandedIdx(null);
     try {
       const res = await knowledgeApi.search(kbId, query.trim());
-      // 确保按分数降序排列（后端已排序，前端二次保证）
       setResults(res.sort((a: any, b: any) => b.score - a.score));
     } catch (err) {
       console.error('搜索测试失败:', err);
@@ -1695,9 +1855,8 @@ function SearchTestPanel({ kbId }: { kbId: string }) {
         </button>
       </div>
 
-      {/* 结果区域：撑满剩余高度，整体滚动 */}
+      {/* 结果区域 */}
       <div className="flex-1 overflow-y-auto min-h-0">
-        {/* Loading 状态 */}
         {searching && (
           <div className="flex items-center justify-center py-8 gap-2" style={{ color: 'var(--color-text-3)' }}>
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -1705,28 +1864,44 @@ function SearchTestPanel({ kbId }: { kbId: string }) {
           </div>
         )}
 
-        {/* 搜索结果（按分数降序） */}
         {!searching && results && results.length > 0 && (
           <div className="space-y-2 pb-2">
-            {results.map((r, i) => (
-              <div key={i} className="rounded-lg border p-3 text-xs"
-                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-background-soft)' }}>
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="font-medium truncate mr-2" style={{ color: 'var(--color-text)' }}>{r.documentName}</span>
-                  <span className="shrink-0 font-bold" style={{ color: 'var(--color-primary)' }}>{(r.score * 100).toFixed(1)}%</span>
+            {results.map((r, i) => {
+              const isExpanded = expandedIdx === i;
+              return (
+                <div key={i}
+                  onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                  className={cn("rounded-lg border p-3 text-xs cursor-pointer transition-colors hover:bg-black/5",
+                    isExpanded && "border-primary")}
+                  style={{
+                    borderColor: isExpanded ? 'var(--color-primary)' : 'var(--color-border)',
+                    backgroundColor: 'var(--color-background-soft)',
+                  }}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="font-medium truncate mr-2" style={{ color: 'var(--color-text)' }}>{r.documentName}</span>
+                    <span className="shrink-0 font-bold" style={{ color: 'var(--color-primary)' }}>{(r.score * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                    {isExpanded ? r.content : r.content.slice(0, 200)}
+                    {!isExpanded && r.content.length > 200 && (
+                      <span className="ml-1" style={{ color: 'var(--color-primary)' }}>...展开</span>
+                    )}
+                  </div>
+                  {isExpanded && r.metadata && (
+                    <div className="mt-2 pt-2 border-t text-[10px]" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-3)' }}>
+                      <span>嵌入模型: {r.metadata.embedding_model_name} · 维度: {r.metadata.embedding_dimension} · 分块策略: {chunkStrategyLabel(r.metadata.chunk_strategy)}</span>
+                    </div>
+                  )}
                 </div>
-                <div className="leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{r.content.slice(0, 200)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
-        {/* 无结果 */}
         {!searching && results && results.length === 0 && (
           <div className="text-sm py-8 text-center" style={{ color: 'var(--color-text-3)' }}>未找到匹配结果</div>
         )}
 
-        {/* 初始空状态 */}
         {!searching && results === null && (
           <div className="text-sm py-8 text-center" style={{ color: 'var(--color-text-3)' }}>输入查询关键词进行检索测试</div>
         )}

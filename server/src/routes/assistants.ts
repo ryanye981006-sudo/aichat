@@ -47,7 +47,7 @@ router.post('/', (req, res) => {
     temperature_enabled ? 1 : 0,
     context_rounds ?? 10,
     enable_memory ? 1 : 0,
-    JSON.stringify(knowledge_base_ids || []),
+    Array.isArray(knowledge_base_ids) ? JSON.stringify(knowledge_base_ids) : (knowledge_base_ids || '[]'),
     thinking_mode || 'default'
   );
 
@@ -84,7 +84,8 @@ router.put('/:id', (req, res) => {
 
   if (req.body.knowledge_base_ids !== undefined) {
     updates.push('knowledge_base_ids = ?');
-    values.push(JSON.stringify(req.body.knowledge_base_ids));
+    const kbIdsVal = req.body.knowledge_base_ids;
+    values.push(Array.isArray(kbIdsVal) ? JSON.stringify(kbIdsVal) : kbIdsVal);
   }
 
   if (updates.length > 0) {

@@ -1,8 +1,9 @@
 import { FormEvent, useState, useRef, useEffect, useCallback } from 'react';
-import type { Assistant, Message, Provider, Model } from '../types';
+import type { Assistant, Message, Provider, Model, KnowledgeBase } from '../types';
 import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
-import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle } from 'lucide-react';
+import { knowledgeApi } from '../services/api';
+import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle, X } from 'lucide-react';
 import { Tooltip } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
@@ -12,15 +13,17 @@ import CitationBlock from './shared/CitationBlock';
 interface ChatAreaProps {
   assistant: Assistant | null;
   messages: Message[];
-  onSendMessage: (content: string, thinkingMode: string) => void;
+  onSendMessage: (content: string, thinkingMode: string, kbIds: string[]) => void;
   isStreaming: boolean;
   onEditAssistant: (assistant: Assistant) => void;
   onThinkingModeChange?: (mode: string) => void;
   providers: Provider[];
   models: Model[];
   onStopGeneration?: () => void;
-  onRegenerate: (messageId: string, thinkingMode: string) => void;
+  onRegenerate: (messageId: string, thinkingMode: string, kbIds: string[]) => void;
   citations?: any[];
+  kbSearchStatus?: string | null;
+  assistantKbCacheRef: React.MutableRefObject<Record<string, string[]>>;
 }
 
 /** 格式化时间: YYYY-MM-DD HH:mm:ss */
@@ -41,7 +44,7 @@ function formatTime(iso: string): string {
 
 export default function ChatArea({
   assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
-  providers, models, onRegenerate, citations = [],
+  providers, models, onRegenerate, citations = [], kbSearchStatus, assistantKbCacheRef,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -49,6 +52,35 @@ export default function ChatArea({
   const [thinkingMode, setThinkingMode] = useState<string>(assistant?.thinking_mode || 'default');
   const [showThinkDropdown, setShowThinkDropdown] = useState(false);
   const thinkDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 知识库选择
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [showKbDropdown, setShowKbDropdown] = useState(false);
+  const kbDropdownRef = useRef<HTMLDivElement>(null);
+  const availableKbs = knowledgeBases.filter(kb => kb.document_count > 0);
+
+  // 从缓存或助手默认配置恢复 KB 选择
+  const getCachedKbIds = (): string[] => {
+    if (!assistant?.id) return [];
+    const cached = assistantKbCacheRef.current[assistant.id];
+    if (cached) return cached;
+    // 无缓存时使用助手的默认知识库配置
+    try {
+      const defaults = JSON.parse((assistant as any).knowledge_base_ids || '[]');
+      return Array.isArray(defaults) ? defaults : [];
+    } catch { return []; }
+  };
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>(getCachedKbIds);
+
+  // 助手切换时恢复缓存
+  useEffect(() => {
+    setSelectedKbIds(getCachedKbIds());
+  }, [assistant?.id]);
+
+  // 加载知识库列表
+  useEffect(() => {
+    knowledgeApi.list().then(kbs => setKnowledgeBases(kbs as KnowledgeBase[])).catch(() => {});
+  }, [assistant?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -61,23 +93,26 @@ export default function ChatArea({
     }
   }, [assistant?.thinking_mode]);
 
-  // 点击外部关闭深度思考下拉
+  // 点击外部关闭下拉
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (thinkDropdownRef.current && !thinkDropdownRef.current.contains(e.target as Node)) {
         setShowThinkDropdown(false);
       }
+      if (kbDropdownRef.current && !kbDropdownRef.current.contains(e.target as Node)) {
+        setShowKbDropdown(false);
+      }
     };
-    if (showThinkDropdown) {
+    if (showThinkDropdown || showKbDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showThinkDropdown]);
+  }, [showThinkDropdown, showKbDropdown]);
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isStreaming) return;
-    onSendMessage(input.trim(), thinkingMode);
+    onSendMessage(input.trim(), thinkingMode, selectedKbIds);
     setInput('');
   };
 
@@ -233,10 +268,13 @@ export default function ChatArea({
                       backgroundColor: 'var(--color-background-soft)',
                       borderColor: 'var(--color-border-soft)',
                     }}>
-                      <div className="flex items-center gap-1" style={{ color: 'var(--color-text-3)' }}>
+                      <div className="flex items-center gap-2" style={{ color: 'var(--color-text-3)' }}>
                         <span className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-primary)', animationDelay: '0ms' }} />
                         <span className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-primary)', animationDelay: '150ms' }} />
                         <span className="w-2 h-2 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-primary)', animationDelay: '300ms' }} />
+                        {kbSearchStatus && (
+                          <span className="text-sm">{kbSearchStatus}</span>
+                        )}
                       </div>
                     </div>
                   ) : null}
@@ -260,7 +298,7 @@ export default function ChatArea({
                       {!isUser && (
                         <div className="flex items-center gap-0.5">
                           <button
-                            onClick={() => isLatestAi && onRegenerate(message.id, thinkingMode)}
+                            onClick={() => isLatestAi && onRegenerate(message.id, thinkingMode, selectedKbIds)}
                             disabled={!isLatestAi}
                             className="p-1 rounded transition-colors hover:bg-black/5 disabled:opacity-30 disabled:cursor-not-allowed"
                             style={{ color: 'var(--color-text-3)' }}
@@ -293,13 +331,16 @@ export default function ChatArea({
                       )}
                     </div>
                   )}
+                  {/* 引用来源 —— 仅最后一条助手消息显示，统一由 gap-1.5 控制与时间戳间距 */}
+                  {isLatestAi && citations.length > 0 && (
+                    <CitationBlock citations={citations} />
+                  )}
                 </div>
               </div>
             );
           }
         );
       })()}
-          <CitationBlock citations={citations} />
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -370,11 +411,92 @@ export default function ChatArea({
                     )}
                   </div>
                 )}
-                <button type="button" className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors border"
-                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>
-                  <Book className="w-3 h-3" />
-                  知识库
-                </button>
+                {/* 知识库选择按钮 */}
+                {availableKbs.length > 0 && (
+                  <div className="relative" ref={kbDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowKbDropdown(!showKbDropdown)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors border"
+                      style={{
+                        borderColor: selectedKbIds.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: selectedKbIds.length > 0 ? 'var(--color-primary)' : 'var(--color-text-2)',
+                      }}
+                    >
+                      <Book className="w-3 h-3" />
+                      {selectedKbIds.length > 0 ? `知识库(${selectedKbIds.length})` : '知识库'}
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    {showKbDropdown && (
+                      <div className="absolute bottom-full left-0 mb-1.5 rounded-xl border shadow-lg py-1 z-50 min-w-[240px]"
+                        style={{
+                          backgroundColor: 'var(--color-background)',
+                          borderColor: 'var(--color-border)',
+                        }}>
+                        <div className="px-3 py-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                          <div className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>选择知识库</div>
+                          <div className="text-[10px] mt-0.5" style={{ color: 'var(--color-text-3)' }}>仅显示已处理完成的知识库</div>
+                        </div>
+                        <div className="max-h-[220px] overflow-y-auto">
+                          {availableKbs.map(kb => {
+                            const isSelected = selectedKbIds.includes(kb.id);
+                            return (
+                              <button
+                                key={kb.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedKbIds(prev => {
+                                    const next = prev.includes(kb.id)
+                                      ? prev.filter(id => id !== kb.id)
+                                      : [...prev, kb.id];
+                                    if (assistant) {
+                                      assistantKbCacheRef.current[assistant.id] = next;
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-black/5 transition-colors flex items-center gap-2"
+                              >
+                                <div className={cn(
+                                  "w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0",
+                                  isSelected ? "border-primary" : "border-gray-300"
+                                )}
+                                style={{
+                                  borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
+                                  backgroundColor: isSelected ? 'var(--color-primary)' : 'transparent',
+                                }}>
+                                  {isSelected && <span className="text-white text-[8px]">✓</span>}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-xs font-medium truncate" style={{ color: 'var(--color-text)' }}>{kb.name}</div>
+                                  <div className="text-[10px] truncate" style={{ color: 'var(--color-text-3)' }}>
+                                    {kb.document_count} 个文档 · TopK {kb.search_top_k}
+                                    {kb.enable_rerank ? ' · 重排序' : ''}
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {selectedKbIds.length > 0 && (
+                          <div className="px-3 py-2 border-t flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+                            <span className="text-[10px]" style={{ color: 'var(--color-text-3)' }}>已选 {selectedKbIds.length} 个</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedKbIds([]);
+                                if (assistant) {
+                                  assistantKbCacheRef.current[assistant.id] = [];
+                                }
+                              }}
+                              className="text-[10px] hover:underline" style={{ color: 'var(--color-text-3)' }}
+                            >清空</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="flex gap-1.5 items-center">
                 {/* 上下文轮数 — 紧挨上传按钮左侧 */}

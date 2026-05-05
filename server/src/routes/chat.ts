@@ -16,7 +16,7 @@ function isQwenModel(modelName: string): boolean {
 }
 
 router.post('/completions', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message, thinking_mode } = req.body;
+  const { assistant_id, conversation_id, message, thinking_mode, kb_ids } = req.body;
 
   if (!assistant_id || !message) {
     res.status(400).json({ error: 'assistant_id 和 message 不能为空' });
@@ -87,20 +87,71 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
   }
 
-  // 注入知识库
+  // 注入知识库：前端显式传递时以前端为准（含空数组），否则使用助手配置
   let kbIds: string[] = [];
-  try {
-    kbIds = JSON.parse(assistant.knowledge_base_ids || '[]');
-  } catch { kbIds = []; }
+  if (Array.isArray(kb_ids)) {
+    kbIds = kb_ids;
+  } else {
+    try {
+      const parsed = JSON.parse(assistant.knowledge_base_ids || '[]');
+      // 防御双重 JSON 编码：解析结果仍为字符串则再解析一次
+      kbIds = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
+      if (!Array.isArray(kbIds)) kbIds = [];
+    } catch { kbIds = []; }
+  }
 
   // 知识库检索结果（在注入系统提示词前声明，用于后续引用传递）
   let kbResults: any[] = [];
+  const hasKb = kbIds.length > 0;
 
-  if (kbIds.length > 0) {
+  // 记录请求入口时间，用于 TTFT 计算（含知识库检索耗时）
+  const requestStartTime = Date.now();
+
+  // SSE 提前建立，让用户立刻看到状态反馈
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  // 防止重复调用 res.end() 导致进程崩溃
+  let responseEnded = false;
+  const endResponse = () => {
+    if (!responseEnded) {
+      responseEnded = true;
+      res.end();
+    }
+  };
+
+  const sendSSE = (data: Record<string, unknown>) => {
+    if (!responseEnded) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  // 客户端断开连接时中止 LLM 调用
+  const abortController = new AbortController();
+  let clientDisconnected = false;
+  const handleDisconnect = () => {
+    if (!clientDisconnected) {
+      clientDisconnected = true;
+      abortController.abort();
+    }
+  };
+  res.on('close', handleDisconnect);
+  req.on('aborted', handleDisconnect);
+
+  // 知识库检索
+  const tSearchStart = Date.now();
+  if (hasKb) {
+    sendSSE({ type: 'status', message: '正在检索知识库...' });
+
     kbResults = await knowledgeService.search(
       kbIds, message, undefined, undefined,
-      assistant.provider_id, assistant.model_id
+      assistant.provider_id, assistant.model_id, true
     );
+    console.log(`[Chat] 知识库检索完成 | 耗时 ${Date.now() - tSearchStart}ms | 结果 ${kbResults.length} 条`);
     if (kbResults.length > 0) {
       const kbContext = kbResults.map((r: any, i: number) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
       systemContent += `\n\n## 相关知识库内容\n${kbContext}`;
@@ -117,35 +168,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     systemContent += THINK_DISABLED_INSTRUCTION;
   }
 
-  // 设置 SSE 响应头
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-
-  const sendSSE = (data: Record<string, unknown>) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
-  // 客户端断开连接时中止 LLM 调用
-  const abortController = new AbortController();
-  let clientDisconnected = false;
-  const handleDisconnect = () => {
-    if (!clientDisconnected) {
-      clientDisconnected = true;
-      abortController.abort();
-    }
-  };
-  // 监听响应流关闭（SSE 客户端断开）和请求中止
-  // 注意：不能用 req.on('close')，因为 Express body parser 消费完请求体后
-  // req 的 readable stream 会自然关闭，导致 abort 被提前触发
-  res.on('close', handleDisconnect);
-  req.on('aborted', handleDisconnect);
-
-  // 发送对话 ID
-  // 构建引用信息
+  // 发送对话 ID 和引用信息
   const citations = kbResults.map((r: any) => ({
     documentName: r.documentName,
     score: r.score,
@@ -174,6 +197,8 @@ router.post('/completions', async (req: Request, res: Response) => {
   }
 
   let fullRawContent = '';
+  const tLlmStart = Date.now();
+  let firstTokenLogged = false;
 
   // 调用 LLM 流式（传入 abortSignal 以支持中止）
   await aiService.chatStream(
@@ -183,6 +208,10 @@ router.post('/completions', async (req: Request, res: Response) => {
     assistant.temperature_enabled ? assistant.temperature : 0.7,
     {
       onToken(token: string) {
+        if (!firstTokenLogged) {
+          firstTokenLogged = true;
+          console.log(`[Chat] 首字到达 | 总TTFT ${Date.now() - requestStartTime}ms | LLM首字 ${Date.now() - tLlmStart}ms`);
+        }
         fullRawContent += token;
         sendSSE({ type: 'token', content: token });
 
@@ -220,7 +249,7 @@ router.post('/completions', async (req: Request, res: Response) => {
         // 保存助手消息到 DB（含性能指标）
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, activeConvId, 'assistant', parsedContent, fullText, thoughtProcess,
           modelName, providerName || null,
@@ -228,21 +257,25 @@ router.post('/completions', async (req: Request, res: Response) => {
           metrics?.completionTokens ?? null,
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
+          citations.length > 0 ? JSON.stringify(citations) : null,
         );
 
         // 更新对话时间
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
 
-        // 发送完成事件
+        // 发送完成事件（含计时明细用于调试）
+        const totalMs = Date.now() - requestStartTime;
+        const kbSearchMs = tLlmStart - tSearchStart;
         sendSSE({
           type: 'done',
           message_id: aiMsgId,
           content: parsedContent,
           thoughtProcess,
           metrics: metrics || null,
+          timing: { totalMs, kbSearchMs, llmTtftMs: metrics?.ttftMs ?? null },
         });
 
-        res.end();
+        endResponse();
 
         // 异步处理记忆提取
         if (assistant.enable_memory) {
@@ -257,11 +290,12 @@ router.post('/completions', async (req: Request, res: Response) => {
       },
       onError(error: Error) {
         sendSSE({ type: 'error', message: error.message });
-        res.end();
+        endResponse();
       },
     },
     abortController.signal,
     thinkingMode,
+    requestStartTime,
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -276,17 +310,17 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
-  res.end();
+  endResponse();
 });
 
 // 重新生成 —— 删除指定助手消息后重新调用 LLM
 router.post('/regenerate', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message_id, thinking_mode } = req.body;
+  const { assistant_id, conversation_id, message_id, thinking_mode, kb_ids } = req.body;
 
   if (!assistant_id || !conversation_id || !message_id) {
     res.status(400).json({ error: 'assistant_id、conversation_id 和 message_id 不能为空' });
@@ -344,15 +378,65 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
   }
   let kbIds: string[] = [];
-  try {
-    kbIds = JSON.parse(assistant.knowledge_base_ids || '[]');
-  } catch { kbIds = []; }
+  if (Array.isArray(kb_ids)) {
+    kbIds = kb_ids;
+  } else {
+    try {
+      const parsed = JSON.parse(assistant.knowledge_base_ids || '[]');
+      kbIds = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
+      if (!Array.isArray(kbIds)) kbIds = [];
+    } catch { kbIds = []; }
+  }
   let kbResults: any[] = [];
-  if (kbIds.length > 0) {
+  const hasKb = kbIds.length > 0;
+
+  // 记录请求入口时间，用于 TTFT 计算（含知识库检索耗时）
+  const requestStartTime = Date.now();
+
+  // SSE 提前建立，让用户立刻看到状态反馈
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  // 防止重复调用 res.end() 导致进程崩溃
+  let responseEnded = false;
+  const endResponse = () => {
+    if (!responseEnded) {
+      responseEnded = true;
+      res.end();
+    }
+  };
+
+  const sendSSE = (data: Record<string, unknown>) => {
+    if (!responseEnded) {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  // 客户端断开连接时中止 LLM 调用
+  const abortController = new AbortController();
+  let clientDisconnected = false;
+  const handleDisconnect = () => {
+    if (!clientDisconnected) {
+      clientDisconnected = true;
+      abortController.abort();
+    }
+  };
+  res.on('close', handleDisconnect);
+  req.on('aborted', handleDisconnect);
+
+  // 知识库检索
+  const tSearchStart = Date.now();
+  if (hasKb) {
+    sendSSE({ type: 'status', message: '正在检索知识库...' });
     kbResults = await knowledgeService.search(
       kbIds, lastUserMsg.content, undefined, undefined,
       assistant.provider_id, assistant.model_id
     );
+    console.log(`[Chat/Regen] 知识库检索完成 | 耗时 ${Date.now() - tSearchStart}ms | 结果 ${kbResults.length} 条`);
     if (kbResults.length > 0) {
       const kbContext = kbResults.map((r: any, i: number) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
       systemContent += `\n\n## 相关知识库内容\n${kbContext}`;
@@ -377,17 +461,6 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
-
-  const sendSSE = (data: Record<string, unknown>) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
   // 构建引用信息
   const citations = kbResults.map((r: any) => ({
     documentName: r.documentName,
@@ -396,18 +469,6 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     metadata: r.metadata || null,
   }));
   sendSSE({ type: 'meta', conversation_id, citations });
-
-  // 客户端断开连接时中止 LLM 调用
-  const abortController = new AbortController();
-  let clientDisconnected = false;
-  const handleDisconnect = () => {
-    if (!clientDisconnected) {
-      clientDisconnected = true;
-      abortController.abort();
-    }
-  };
-  res.on('close', handleDisconnect);
-  req.on('aborted', handleDisconnect);
 
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
@@ -428,6 +489,8 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   }
 
   let fullRawContent = '';
+  const tLlmStart = Date.now();
+  let firstTokenLogged = false;
 
   await aiService.chatStream(
     chatMessages,
@@ -436,6 +499,10 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     assistant.temperature_enabled ? assistant.temperature : 0.7,
     {
       onToken(token: string) {
+        if (!firstTokenLogged) {
+          firstTokenLogged = true;
+          console.log(`[Chat/Regen] 首字到达 | 总TTFT ${Date.now() - requestStartTime}ms | LLM首字 ${Date.now() - tLlmStart}ms`);
+        }
         fullRawContent += token;
         sendSSE({ type: 'token', content: token });
         const thinkMatch = fullRawContent.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
@@ -463,7 +530,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, conversation_id, 'assistant', parsedContent, fullText, thoughtProcess,
           modelName, providerName || null,
@@ -471,19 +538,23 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           metrics?.completionTokens ?? null,
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
+          citations.length > 0 ? JSON.stringify(citations) : null,
         );
 
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
 
+        const totalMs = Date.now() - requestStartTime;
+        const kbSearchMs = tLlmStart - tSearchStart;
         sendSSE({
           type: 'done',
           message_id: aiMsgId,
           content: parsedContent,
           thoughtProcess,
           metrics: metrics || null,
+          timing: { totalMs, kbSearchMs, llmTtftMs: metrics?.ttftMs ?? null },
         });
 
-        res.end();
+        endResponse();
 
         if (assistant.enable_memory) {
           const recentMessages = db.prepare(
@@ -497,14 +568,15 @@ router.post('/regenerate', async (req: Request, res: Response) => {
       onError(error: Error) {
         // 回滚：恢复被删除的消息，避免数据丢失
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process, targetMsg.model_name || modelName, targetMsg.provider_name || providerName || null);
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process, targetMsg.model_name || modelName, targetMsg.provider_name || providerName || null, targetMsg.citations || null);
         sendSSE({ type: 'error', message: error.message });
-        res.end();
+        endResponse();
       },
     },
     abortController.signal,
     regenThinkingMode,
+    requestStartTime,
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -519,12 +591,12 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
-  res.end();
+  endResponse();
 });
 
 export default router;

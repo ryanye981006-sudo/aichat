@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import AssistantModal from './components/AssistantModal';
@@ -23,10 +23,16 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [citations, setCitations] = useState<any[]>([]);
+  const [kbSearchStatus, setKbSearchStatus] = useState<string | null>(null);
 
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
+
+  // 知识库选择按助手维度缓存：切换会话时保持选中
+  const assistantKbCacheRef = useRef<Record<string, string[]>>({});
+  // 消息按会话维度缓存：流式生成中切出再切回时保留流式状态
+  const messagesCacheRef = useRef<Record<string, Message[]>>({});
 
   // ===== 初始化加载 =====
   useEffect(() => {
@@ -59,39 +65,62 @@ export default function App() {
     } catch (e) { console.error(e); }
   };
 
-  // 将服务端扁平列转换为前端 metrics 对象
-  const normalizeMessageMetrics = (msg: any): Message => {
-    if (msg.metrics) return msg; // 已经是 metrics 对象
-    const promptTokens = msg.prompt_tokens ?? 0;
-    const completionTokens = msg.completion_tokens ?? 0;
-    // 只有确实有 token 数据时才生成 metrics（排除全 NULL 或全 0 的情况）
+  // 将服务端扁平列转换为前端对象（metrics + citations JSON 解析）
+  const normalizeMessage = (msg: any): Message => {
+    let normalized = { ...msg };
+
+    // 解析 citations JSON 字符串
+    if (typeof normalized.citations === 'string' && normalized.citations) {
+      try {
+        normalized.citations = JSON.parse(normalized.citations);
+      } catch {
+        normalized.citations = null;
+      }
+    }
+
+    if (normalized.metrics) return normalized;
+
+    const promptTokens = normalized.prompt_tokens ?? 0;
+    const completionTokens = normalized.completion_tokens ?? 0;
     if (promptTokens > 0 || completionTokens > 0) {
       return {
-        ...msg,
+        ...normalized,
         metrics: {
           promptTokens,
           completionTokens,
           totalTokens: promptTokens + completionTokens,
-          ttftMs: msg.ttft_ms ?? 0,
-          tokensPerSecond: msg.tokens_per_second ?? 0,
+          ttftMs: normalized.ttft_ms ?? 0,
+          tokensPerSecond: normalized.tokens_per_second ?? 0,
         },
       };
     }
-    return msg;
+    return normalized;
   };
 
   const loadMessages = async (conversationId: string) => {
     try {
       const msgs = await messagesApi.list(conversationId);
-      setMessages(msgs.map(normalizeMessageMetrics));
+      const normalized = msgs.map(normalizeMessage);
+      setMessages(normalized);
+      // 从历史消息中恢复 citations（取最后一条助手消息的）
+      const lastAssistant = [...normalized].reverse().find((m: any) => m.role === 'assistant' && m.citations);
+      if (lastAssistant) {
+        setCitations(lastAssistant.citations);
+      }
     } catch (e) { console.error(e); }
   };
 
   // ===== 助手操作 =====
   const handleSelectAssistant = useCallback(async (id: string) => {
+    // 中止当前流式，防止 token 写入错误会话
+    abortController?.abort();
+    setIsStreaming(false);
+    setStreamingConversationId(null);
+
     setCurrentAssistantId(id);
     setSidebarTab('topics');
     setIsSettingsMode(false);
+    setCitations([]);
     try {
       const convs = await conversationsApi.list(id);
       setConversations(convs);
@@ -108,7 +137,7 @@ export default function App() {
       setCurrentConversationId(null);
       setMessages([]);
     }
-  }, []);
+  }, [abortController]);
 
   const handleCreateAssistant = () => {
     setEditingAssistant(null);
@@ -169,14 +198,36 @@ export default function App() {
 
   // ===== 对话操作 =====
   const handleSelectConversation = useCallback((id: string) => {
+    if (id === currentConversationId) return;
+
+    // 中止当前流式，防止 token 写入错误会话
+    abortController?.abort();
+    setIsStreaming(false);
+    setStreamingConversationId(null);
+
+    // 缓存当前会话消息（保留流式中的临时消息）
+    if (currentConversationId) {
+      messagesCacheRef.current[currentConversationId] = messages;
+    }
     setCurrentConversationId(id);
     setIsSettingsMode(false);
-    loadMessages(id);
+
+    // 优先从缓存恢复，缓存未命中才从服务端加载
+    const cached = messagesCacheRef.current[id];
+    if (cached && cached.length > 0) {
+      setMessages(cached);
+      // 从缓存消息中恢复 citations
+      const lastAssistant = [...cached].reverse().find((m: any) => m.role === 'assistant' && m.citations);
+      setCitations(lastAssistant?.citations || []);
+    } else {
+      setCitations([]);
+      loadMessages(id);
+    }
     const conv = conversations.find(c => c.id === id);
     if (conv) {
       setCurrentAssistantId(conv.assistant_id);
     }
-  }, [conversations]);
+  }, [conversations, messages, currentConversationId, abortController]);
 
   const handleCreateConversation = async () => {
     if (!currentAssistantId) return;
@@ -185,12 +236,13 @@ export default function App() {
       setConversations(prev => [conv, ...prev]);
       setCurrentConversationId(conv.id);
       setMessages([]);
+      setCitations([]);
       setIsSettingsMode(false);
     } catch (e) { console.error(e); }
   };
 
   // ===== 发送消息 =====
-  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default') => {
+  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', kbIds: string[] = []) => {
     if (!currentAssistantId) return;
 
     // 只阻止当前活跃会话在流式时发送消息
@@ -252,7 +304,10 @@ export default function App() {
           activeConvId = convId;
           setStreamingConversationId(convId);
         }
-        if (newCitations) setCitations(newCitations);
+        if (newCitations !== undefined) setCitations(newCitations);
+      },
+      onStatus(message: string) {
+        setKbSearchStatus(message);
       },
       onToken(token) {
         fullRawContent += token;
@@ -272,6 +327,7 @@ export default function App() {
         ));
       },
       onDone(messageId, content, thoughtProcess, metrics, aborted) {
+        setKbSearchStatus(null);
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id
             ? { ...m, id: messageId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
@@ -280,10 +336,13 @@ export default function App() {
         setIsStreaming(false);
         setStreamingConversationId(null);
         setAbortController(null);
-        if (activeConvId) loadMessages(activeConvId);
+        delete messagesCacheRef.current[activeConvId];
+        // 仅当用户仍在当前会话时才刷新消息（避免切到其他会话时被覆盖）
+        if (activeConvId && activeConvId === currentConversationId) loadMessages(activeConvId);
         if (currentAssistantId) loadConversations(currentAssistantId);
       },
       onError(error) {
+        setKbSearchStatus(null);
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id
             ? { ...m, content: `错误: ${error}`, isStreaming: false }
@@ -292,17 +351,21 @@ export default function App() {
         setIsStreaming(false);
         setStreamingConversationId(null);
         setAbortController(null);
+        delete messagesCacheRef.current[activeConvId];
       },
-    });
+    }, kbIds);
     setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
 
   // ===== 重新生成 =====
-  const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default') => {
+  const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default', kbIds: string[] = []) => {
     if (!currentAssistantId || !currentConversationId) return;
     if (isStreaming && streamingConversationId === currentConversationId) return;
 
     const activeConvId = currentConversationId;
+
+    // 清除旧引用，等待新 meta 事件更新
+    setCitations([]);
 
     // 立即隐藏旧消息并显示 loading，不等服务端响应
     setMessages(prev => prev.map(m =>
@@ -317,7 +380,7 @@ export default function App() {
     if (messageId.startsWith('temp-')) {
       try {
         const msgs = await messagesApi.list(activeConvId);
-        const normalized = msgs.map(normalizeMessageMetrics);
+        const normalized = msgs.map(normalizeMessage);
 
         const lastAi = [...normalized].reverse().find(m => m.role === 'assistant');
         if (!lastAi || lastAi.id.startsWith('temp-')) {
@@ -341,7 +404,7 @@ export default function App() {
         const msgs = await messagesApi.list(activeConvId);
         const exists = msgs.some((m: any) => m.id === messageId);
         if (!exists) {
-          const normalized = msgs.map(normalizeMessageMetrics);
+          const normalized = msgs.map(normalizeMessage);
           const lastAi = [...normalized].reverse().find((m: any) => m.role === 'assistant');
           if (!lastAi || lastAi.id.startsWith('temp-')) {
             setIsStreaming(false);
@@ -366,7 +429,10 @@ export default function App() {
 
     const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, {
       onMeta(_convId, newCitations) {
-        if (newCitations) setCitations(newCitations);
+        if (newCitations !== undefined) setCitations(newCitations);
+      },
+      onStatus(message: string) {
+        setKbSearchStatus(message);
       },
       onToken(token) {
         fullRawContent += token;
@@ -386,6 +452,7 @@ export default function App() {
         ));
       },
       onDone(newMsgId, content, thoughtProcess, metrics, aborted) {
+        setKbSearchStatus(null);
         setMessages(prev => prev.map(m =>
           m.id === effectiveMessageId
             ? { ...m, id: newMsgId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
@@ -394,9 +461,11 @@ export default function App() {
         setIsStreaming(false);
         setStreamingConversationId(null);
         setAbortController(null);
-        loadMessages(activeConvId);
+        delete messagesCacheRef.current[activeConvId];
+        if (activeConvId === currentConversationId) loadMessages(activeConvId);
       },
       onError(error) {
+        setKbSearchStatus(null);
         setMessages(prev => prev.map(m =>
           m.id === effectiveMessageId
             ? { ...m, content: `错误: ${error}`, isStreaming: false }
@@ -405,8 +474,9 @@ export default function App() {
         setIsStreaming(false);
         setStreamingConversationId(null);
         setAbortController(null);
+        delete messagesCacheRef.current[activeConvId];
       },
-    });
+    }, kbIds);
     setAbortController(regenController);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages]);
 
@@ -471,6 +541,8 @@ export default function App() {
             providers={providers}
             models={models}
             citations={citations}
+            kbSearchStatus={kbSearchStatus}
+            assistantKbCacheRef={assistantKbCacheRef}
           />
         )}
       </div>

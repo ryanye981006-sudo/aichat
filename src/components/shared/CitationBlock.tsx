@@ -26,7 +26,7 @@ export default function CitationBlock({ citations }: CitationBlockProps) {
   if (!citations || citations.length === 0) return null;
 
   return (
-    <div className="mt-2 rounded-lg border text-xs" style={{
+    <div className="rounded-lg border text-xs" style={{
       borderColor: 'var(--color-border)',
       backgroundColor: 'var(--color-background-soft)',
     }}>
