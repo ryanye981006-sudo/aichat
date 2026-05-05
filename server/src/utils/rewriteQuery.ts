@@ -35,8 +35,8 @@ export async function rewriteQuery(
         { role: 'system', content: REWRITE_PROMPT },
         { role: 'user', content: query },
       ],
-      providerId,
       modelId,
+      providerId,
       0.1,
     );
 

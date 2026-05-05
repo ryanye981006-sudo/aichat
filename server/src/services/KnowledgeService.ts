@@ -77,7 +77,11 @@ export class KnowledgeService {
 
       // 获取实际使用的嵌入配置
       let providerId: string | null = kb.embedding_provider_id || null;
-      let modelName: string | null = kb.embedding_model_id || null;
+      let modelName: string | null = null;
+      if (kb.embedding_model_id) {
+        const model = db.prepare('SELECT name FROM models WHERE id = ?').get(kb.embedding_model_id) as any;
+        modelName = model?.name || null;
+      }
 
       // 如果 KB 没有嵌入配置，尝试使用全局默认
       if (!providerId || !modelName) {
@@ -260,11 +264,15 @@ export class KnowledgeService {
     // 重排序：任一 KB 启用了 rerank 且有配置时执行
     const rerankKb = kbs.find((kb: any) => kb.enable_rerank && kb.rerank_provider_id && kb.rerank_model_id);
     if (rerankKb && sorted.length > 0) {
-      const recallSize = Math.min(sorted.length, k * 3); // 召回更多候选
-      const candidates = sorted.slice(0, recallSize);
-      sorted = await rerankerService.rerank(
-        query, candidates, rerankKb.rerank_provider_id, rerankKb.rerank_model_id, k
-      );
+      // 从 models 表查找实际的模型名称（kb.rerank_model_id 是 UUID）
+      const rerankModel = db.prepare('SELECT name FROM models WHERE id = ?').get(rerankKb.rerank_model_id) as any;
+      if (rerankModel) {
+        const recallSize = Math.min(sorted.length, k * 3); // 召回更多候选
+        const candidates = sorted.slice(0, recallSize);
+        sorted = await rerankerService.rerank(
+          query, candidates, rerankKb.rerank_provider_id, rerankModel.name, k
+        );
+      }
     } else {
       sorted = sorted.slice(0, k);
     }
