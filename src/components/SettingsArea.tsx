@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model, KnowledgeBase, KnowledgeDocument, MemorySettings, MemoryEntry } from '../types';
 import { cn } from '../lib/utils';
 import { providersApi, modelsApi, knowledgeApi, memoryApi } from '../services/api';
-import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2 } from 'lucide-react';
+import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil } from 'lucide-react';
 
 // ===== 通用 Toggle 组件 =====
 function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
@@ -66,6 +66,15 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const [selectedKbId, setSelectedKbId] = useState<string | null>(null);
   const [kbSearch, setKbSearch] = useState('');
   const [showAddKb, setShowAddKb] = useState(false);
+  const [rightTab, setRightTab] = useState<'files' | 'search'>('files');
+
+  // KB 菜单状态（参考助手管理）
+  const [openKbMenuId, setOpenKbMenuId] = useState<string | null>(null);
+  const kbMenuRef = useRef<HTMLDivElement>(null);
+  const kbBtnRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const [kbMenuPos, setKbMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const [pendingDeleteKb, setPendingDeleteKb] = useState<KnowledgeBase | null>(null);
+  const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null);
 
   // 当前选中的知识库对象
   const selectedKb = knowledgeBases.find(kb => kb.id === selectedKbId) || null;
@@ -232,6 +241,61 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
       setShowAddKb(false);
     } catch (e) { console.error(e); }
   };
+
+  const handleUpdateKb = async (data: Partial<KnowledgeBase>) => {
+    if (!editingKb) return;
+    try {
+      const updated = await knowledgeApi.update(editingKb.id, data);
+      setKnowledgeBases(prev => prev.map(k => k.id === updated.id ? updated : k));
+      setEditingKb(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteKb = async (id: string) => {
+    try {
+      await knowledgeApi.remove(id);
+      setKnowledgeBases(prev => prev.filter(k => k.id !== id));
+      if (selectedKbId === id) {
+        setSelectedKbId(null);
+        setDocuments([]);
+      }
+      setPendingDeleteKb(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!selectedKbId) return;
+    try {
+      await knowledgeApi.deleteDocument(selectedKbId, docId);
+      await loadDocuments(selectedKbId);
+    } catch (e) { console.error(e); }
+  };
+
+  // KB 菜单切换
+  const handleKbMenuToggle = (kbId: string, btn: HTMLButtonElement) => {
+    if (openKbMenuId === kbId) {
+      setOpenKbMenuId(null);
+      setKbMenuPos(null);
+      return;
+    }
+    const rect = btn.getBoundingClientRect();
+    setKbMenuPos({ top: rect.bottom + 4, left: rect.left });
+    setOpenKbMenuId(kbId);
+  };
+
+  // 点击外部关闭 KB 菜单
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (kbMenuRef.current && !kbMenuRef.current.contains(e.target as Node)) {
+        setOpenKbMenuId(null);
+        setKbMenuPos(null);
+      }
+    };
+    if (openKbMenuId) {
+      document.addEventListener('mousedown', handler);
+      return () => document.removeEventListener('mousedown', handler);
+    }
+  }, [openKbMenuId]);
 
   const handleUploadDocument = async (kbId: string, file: File) => {
     try {
@@ -472,18 +536,28 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
             </div>
             <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
               {knowledgeBases.filter(k => k.name.includes(kbSearch)).map(kb => (
-                <button
-                  key={kb.id}
-                  onClick={() => { setSelectedKbId(kb.id); loadDocuments(kb.id); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors"
-                  style={{
-                    backgroundColor: selectedKbId === kb.id ? 'var(--color-primary-mute)' : 'transparent',
-                    color: selectedKbId === kb.id ? primaryColor : textColor,
-                  }}
-                >
-                  <Database className="w-4 h-4" style={{ opacity: 0.6 }} />
-                  <span className="truncate">{kb.name}</span>
-                </button>
+                <div key={kb.id} className="relative group">
+                  <button
+                    onClick={() => { setSelectedKbId(kb.id); loadDocuments(kb.id); setRightTab('files'); }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors"
+                    style={{
+                      backgroundColor: selectedKbId === kb.id ? 'var(--color-primary-mute)' : 'transparent',
+                      color: selectedKbId === kb.id ? primaryColor : textColor,
+                    }}
+                  >
+                    <Database className="w-4 h-4 shrink-0" style={{ opacity: 0.6 }} />
+                    <span className="truncate flex-1 text-left">{kb.name}</span>
+                  </button>
+                  <button
+                    ref={el => { if (el) kbBtnRefs.current.set(kb.id, el); else kbBtnRefs.current.delete(kb.id); }}
+                    onClick={(e) => { e.stopPropagation(); handleKbMenuToggle(kb.id, e.currentTarget); }}
+                    className={cn("absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-lg transition-all hover:bg-black/10 shrink-0",
+                      openKbMenuId === kb.id ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
+                    style={{ color: textSecondary }}
+                  >
+                    <MoreHorizontal className="w-4 h-4" />
+                  </button>
+                </div>
               ))}
             </div>
             <div className="p-3 border-t" style={{ borderColor }}>
@@ -495,92 +569,107 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
             </div>
           </div>
 
-          {/* Right: Documents */}
-          <div className="flex-1 overflow-y-auto" style={{ backgroundColor: 'var(--color-background)' }}>
+          {/* Right: Tab切换 (文件管理 / 搜索测试) */}
+          <div className="flex-1 flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
             {selectedKbId ? (
-              <div className="p-6">
-                <div className="flex items-center gap-3 mb-5">
-                  <label className="relative cursor-pointer">
-                    <input type="file" className="hidden" accept=".pdf,.docx,.txt,.md" onChange={e => {
-                      const file = e.target.files?.[0];
-                      if (file) handleUploadDocument(selectedKbId, file);
-                    }} />
-                    <span className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
-                      style={{ backgroundColor: primaryColor }}>
-                      <Upload className="w-4 h-4" /> 上传文件
-                    </span>
-                  </label>
-                  <span className="text-xs" style={{ color: textSecondary }}>
-                    支持 PDF、Word、Markdown、TXT 格式
-                  </span>
+              <>
+                {/* Tab 头部 */}
+                <div className="flex items-center gap-1 px-6 pt-4 pb-0 shrink-0">
+                  <button onClick={() => setRightTab('files')}
+                    className={cn("px-4 py-2 rounded-t-lg text-sm font-medium transition-colors",
+                      rightTab === 'files' ? 'bg-white' : '')}
+                    style={{
+                      color: rightTab === 'files' ? primaryColor : textSecondary,
+                      backgroundColor: rightTab === 'files' ? 'var(--color-background)' : 'transparent',
+                    }}>
+                    文件管理
+                  </button>
+                  <button onClick={() => setRightTab('search')}
+                    className={cn("px-4 py-2 rounded-t-lg text-sm font-medium transition-colors",
+                      rightTab === 'search' ? 'bg-white' : '')}
+                    style={{
+                      color: rightTab === 'search' ? primaryColor : textSecondary,
+                      backgroundColor: rightTab === 'search' ? 'var(--color-background)' : 'transparent',
+                    }}>
+                    搜索测试
+                  </button>
+                  <div className="flex-1 border-b" style={{ borderColor }} />
                 </div>
 
-                <div className="rounded-xl border overflow-hidden" style={{ borderColor }}>
-                  <table className="w-full text-sm">
-                    <thead style={{ backgroundColor: bgMute }}>
-                      <tr style={{ color: textSecondary }}>
-                        <th className="px-4 py-3 text-left font-medium">文件名称</th>
-                        <th className="px-4 py-3 text-left font-medium w-20">状态</th>
-                        <th className="px-4 py-3 text-left font-medium w-16">分块</th>
-                        <th className="px-4 py-3 text-left font-medium w-36">上传时间</th>
-                        <th className="px-4 py-3 text-left font-medium w-20">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {documents.map(doc => (
-                        <tr key={doc.id} className="border-t transition-colors hover:bg-black/5" style={{ borderColor }}>
-                          <td className="px-4 py-3.5">
-                            <div className="flex items-center gap-2">
-                              <FileText className="w-4 h-4" style={{ color: textSecondary }} />
-                              <span style={{ color: textColor }}>{doc.file_name}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3.5">
-                            <span className={cn("text-xs px-2 py-0.5 rounded-full", doc.processing_status === 'completed' ? 'text-green-600 bg-green-50' : doc.processing_status === 'error' ? 'text-red-600 bg-red-50' : 'text-yellow-600 bg-yellow-50')}>
-                              {doc.processing_status === 'completed' ? '已完成' : doc.processing_status === 'error' ? '失败' : '处理中'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5" style={{ color: textSecondary }}>{doc.chunk_count}</td>
-                          <td className="px-4 py-3.5" style={{ color: textSecondary }}>{new Date(doc.created_at).toLocaleDateString()}</td>
-                          <td className="px-4 py-3.5">
-                            <button className="text-red-500 hover:text-red-600 text-xs font-medium">删除</button>
-                          </td>
-                        </tr>
-                      ))}
-                      {documents.length === 0 && (
-                        <tr>
-                          <td colSpan={5} className="px-4 py-10 text-center" style={{ color: textSecondary }}>
-                            暂无文档，请上传文件
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                <div className="flex-1 overflow-y-auto">
+                  {rightTab === 'files' ? (
+                    <div className="p-6">
+                      {/* 上传按钮 */}
+                      <div className="flex items-center gap-3 mb-5">
+                        <label className="relative cursor-pointer">
+                          <input type="file" className="hidden" accept=".pdf,.docx,.txt,.md" onChange={e => {
+                            const file = e.target.files?.[0];
+                            if (file) handleUploadDocument(selectedKbId, file);
+                          }} />
+                          <span className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
+                            style={{ backgroundColor: primaryColor }}>
+                            <Upload className="w-4 h-4" /> 上传文件
+                          </span>
+                        </label>
+                        <span className="text-xs" style={{ color: textSecondary }}>
+                          支持 PDF、Word、Markdown、TXT 格式
+                        </span>
+                      </div>
+
+                      {/* 文件列表 */}
+                      <div className="rounded-xl border overflow-hidden" style={{ borderColor }}>
+                        <table className="w-full text-sm">
+                          <thead style={{ backgroundColor: bgMute }}>
+                            <tr style={{ color: textSecondary }}>
+                              <th className="px-4 py-3 text-left font-medium">文件名称</th>
+                              <th className="px-4 py-3 text-left font-medium w-20">状态</th>
+                              <th className="px-4 py-3 text-left font-medium w-16">分块</th>
+                              <th className="px-4 py-3 text-left font-medium w-36">上传时间</th>
+                              <th className="px-4 py-3 text-left font-medium w-20">操作</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {documents.map(doc => (
+                              <tr key={doc.id} className="border-t transition-colors hover:bg-black/5" style={{ borderColor }}>
+                                <td className="px-4 py-3.5">
+                                  <div className="flex items-center gap-2">
+                                    <FileText className="w-4 h-4" style={{ color: textSecondary }} />
+                                    <span style={{ color: textColor }}>{doc.file_name}</span>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3.5">
+                                  <span className={cn("text-xs px-2 py-0.5 rounded-full", doc.processing_status === 'completed' ? 'text-green-600 bg-green-50' : doc.processing_status === 'error' ? 'text-red-600 bg-red-50' : 'text-yellow-600 bg-yellow-50')}>
+                                    {doc.processing_status === 'completed' ? '已完成' : doc.processing_status === 'error' ? '失败' : '处理中'}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3.5" style={{ color: textSecondary }}>{doc.chunk_count}</td>
+                                <td className="px-4 py-3.5" style={{ color: textSecondary }}>{new Date(doc.created_at).toLocaleDateString()}</td>
+                                <td className="px-4 py-3.5">
+                                  <button onClick={() => handleDeleteDocument(doc.id)}
+                                    className="p-1 rounded transition-colors hover:bg-red-50" style={{ color: '#ef4444' }} title="删除文档">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {documents.length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="px-4 py-10 text-center" style={{ color: textSecondary }}>
+                                  暂无文档，请上传文件
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-6">
+                      <SearchTestPanel kbId={selectedKbId} />
+                    </div>
+                  )}
                 </div>
-
-                {/* KB 配置摘要 + 搜索测试 */}
-                {selectedKb && (
-                  <div className="mt-5 rounded-xl border p-4" style={{ borderColor }}>
-                    <div className="flex items-center justify-between mb-3">
-                      <h4 className="text-sm font-bold" style={{ color: textColor }}>知识库配置</h4>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs" style={{ color: textSecondary }}>
-                      <div>分块策略: {selectedKb.chunk_strategy || 'recursive'}</div>
-                      <div>分块大小: {selectedKb.chunk_size}</div>
-                      <div>重叠: {selectedKb.chunk_overlap}</div>
-                      <div>TopK: {selectedKb.search_top_k}</div>
-                      <div>相似度阈值: {selectedKb.similarity_threshold}</div>
-                      <div>查询改写: {selectedKb.enable_query_rewrite ? '开' : '关'}</div>
-                      <div>重排序: {selectedKb.enable_rerank ? '开' : '关'}</div>
-                    </div>
-
-                    {/* 搜索测试 */}
-                    <div className="mt-4 border-t pt-4" style={{ borderColor }}>
-                      <SearchTestPanel kbId={selectedKb.id} />
-                    </div>
-                  </div>
-                )}
-              </div>
+              </>
             ) : (
               <div className="flex-1 flex items-center justify-center" style={{ color: textSecondary }}>
                 请选择左侧知识库
@@ -706,6 +795,43 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
           providers={providers}
           models={models}
         />
+      )}
+
+      {editingKb && (
+        <AddKbModal
+          initialData={editingKb}
+          onClose={() => setEditingKb(null)}
+          onSave={handleUpdateKb}
+          providers={providers}
+          models={models}
+        />
+      )}
+
+      {/* 删除知识库确认弹窗 */}
+      {pendingDeleteKb && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>删除知识库</h3>
+              <button onClick={() => setPendingDeleteKb(null)} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5">
+              <p className="text-sm" style={{ color: 'var(--color-text-2)' }}>
+                确认删除知识库 <span style={{ color: 'var(--color-text)', fontWeight: 600 }}>{pendingDeleteKb.name}</span>？
+              </p>
+              <p className="text-xs mt-2" style={{ color: 'var(--color-text-3)' }}>
+                该知识库下的所有文档和分块也将被删除，此操作不可撤销。
+              </p>
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => setPendingDeleteKb(null)} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+              <button onClick={() => handleDeleteKb(pendingDeleteKb.id)}
+                className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: '#ef4444' }}>确认删除</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showMemorySettings && memorySettings && (
@@ -844,6 +970,38 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
           </div>
         </div>
       )}
+
+      {/* KB 悬浮菜单 */}
+      {openKbMenuId && kbMenuPos && (() => {
+        const kb = knowledgeBases.find(k => k.id === openKbMenuId);
+        if (!kb) return null;
+        return (
+          <div ref={kbMenuRef} className="fixed w-36 rounded-xl border shadow-lg py-1 z-[9999]"
+            style={{
+              top: kbMenuPos.top,
+              left: kbMenuPos.left,
+              backgroundColor: 'var(--color-background)',
+              borderColor: 'var(--color-border)',
+            }}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setOpenKbMenuId(null); setKbMenuPos(null); setEditingKb(kb); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-black/5 transition-colors"
+              style={{ color: 'var(--color-text)' }}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              编辑知识库
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setOpenKbMenuId(null); setKbMenuPos(null); setPendingDeleteKb(kb); }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-red-50 transition-colors"
+              style={{ color: '#dc2626' }}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              删除知识库
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1222,26 +1380,28 @@ function FetchModelsModal({
   );
 }
 
-// ===== Add KB Modal (含高级设置) =====
-function AddKbModal({ onClose, onSave, providers, models }: {
+// ===== Add/Edit KB Modal (含高级设置) =====
+function AddKbModal({ onClose, onSave, providers, models, initialData }: {
   onClose: () => void;
   onSave: (data: Partial<KnowledgeBase>) => void;
   providers: Provider[];
   models: Model[];
+  initialData?: KnowledgeBase | null;
 }) {
-  const [name, setName] = useState('');
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [embProviderId, setEmbProviderId] = useState('');
-  const [embModelId, setEmbModelId] = useState('');
-  const [chunkSize, setChunkSize] = useState(512);
-  const [chunkOverlap, setChunkOverlap] = useState(50);
-  const [chunkStrategy, setChunkStrategy] = useState<'paragraph' | 'sentence' | 'recursive'>('recursive');
-  const [searchTopK, setSearchTopK] = useState(5);
-  const [similarityThreshold, setSimilarityThreshold] = useState(0.7);
-  const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
-  const [enableRerank, setEnableRerank] = useState(false);
-  const [rerankProviderId, setRerankProviderId] = useState('');
-  const [rerankModelId, setRerankModelId] = useState('');
+  const isEdit = !!initialData;
+  const [name, setName] = useState(initialData?.name || '');
+  const [showAdvanced, setShowAdvanced] = useState(!!initialData?.chunk_strategy);
+  const [embProviderId, setEmbProviderId] = useState(initialData?.embedding_provider_id || '');
+  const [embModelId, setEmbModelId] = useState(initialData?.embedding_model_id || '');
+  const [chunkSize, setChunkSize] = useState(initialData?.chunk_size || 512);
+  const [chunkOverlap, setChunkOverlap] = useState(initialData?.chunk_overlap || 50);
+  const [chunkStrategy, setChunkStrategy] = useState<'paragraph' | 'sentence' | 'recursive'>((initialData?.chunk_strategy as any) || 'recursive');
+  const [searchTopK, setSearchTopK] = useState(initialData?.search_top_k || 5);
+  const [similarityThreshold, setSimilarityThreshold] = useState(initialData?.similarity_threshold || 0.7);
+  const [enableQueryRewrite, setEnableQueryRewrite] = useState(!!initialData?.enable_query_rewrite);
+  const [enableRerank, setEnableRerank] = useState(!!initialData?.enable_rerank);
+  const [rerankProviderId, setRerankProviderId] = useState(initialData?.rerank_provider_id || '');
+  const [rerankModelId, setRerankModelId] = useState(initialData?.rerank_model_id || '');
 
   const embModels = models.filter(m => m.provider_id === embProviderId);
   const rerankModels = models.filter(m => m.provider_id === rerankProviderId);
@@ -1250,7 +1410,7 @@ function AddKbModal({ onClose, onSave, providers, models }: {
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
       <div className="rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)' }}>
         <div className="px-5 py-4 border-b flex justify-between items-center shrink-0" style={{ borderColor: 'var(--color-border)' }}>
-          <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>新建知识库</h3>
+          <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>{isEdit ? '编辑知识库' : '新建知识库'}</h3>
           <button onClick={onClose} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
         </div>
         <div className="overflow-y-auto flex-1 p-5 space-y-4">

@@ -1,5 +1,8 @@
 import { Router } from 'express';
+import path from 'path';
+import fs from 'fs';
 import { getDb } from '../db/connection.js';
+import { config } from '../config.js';
 import { knowledgeService } from '../services/KnowledgeService.js';
 import { processingQueue } from '../services/ProcessingQueue.js';
 import { upload } from '../services/FileStorage.js';
@@ -138,6 +141,38 @@ router.post('/:id/documents', upload.single('file'), async (req, res) => {
     });
 
     res.status(201).json(doc);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 删除文档及其分块和上传文件
+router.delete('/:id/documents/:docId', (req, res) => {
+  try {
+    const db = getDb();
+    const doc = db.prepare('SELECT * FROM knowledge_documents WHERE id = ? AND knowledge_base_id = ?')
+      .get(req.params.docId, req.params.id) as any;
+    if (!doc) {
+      return res.status(404).json({ error: '文档不存在' });
+    }
+
+    // 删除上传文件
+    if (doc.file_path) {
+      try {
+        const filePath = path.join(config.uploadsDir, doc.file_path);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (err) {
+        console.warn('[KnowledgeRoute] 删除文件失败:', err);
+      }
+    }
+
+    // 删除分块和文档记录
+    db.prepare('DELETE FROM knowledge_chunks WHERE document_id = ?').run(doc.id);
+    db.prepare('DELETE FROM knowledge_documents WHERE id = ?').run(doc.id);
+
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

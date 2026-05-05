@@ -79,6 +79,8 @@ export const knowledgeApi = {
     formData.append('file', file);
     return fetch(`${BASE_URL}/knowledge/${kbId}/documents`, { method: 'POST', body: formData }).then(r => r.json());
   },
+  deleteDocument: (kbId: string, docId: string) =>
+    request<any>(`/knowledge/${kbId}/documents/${docId}`, { method: 'DELETE' }),
   getChunks: (kbId: string, docId: string) => request<any[]>(`/knowledge/${kbId}/documents/${docId}/chunks`),
   search: (kbId: string, query: string, topK?: number, threshold?: number) =>
     request<any[]>(`/knowledge/${kbId}/search`, { method: 'POST', body: JSON.stringify({ query, topK, threshold }) }),
