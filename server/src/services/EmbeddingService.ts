@@ -1,20 +1,36 @@
 // 统一嵌入服务：调用 OpenAI 兼容的 /v1/embeddings API
+// 支持嵌入缓存、指数退避重试、批量嵌入
 import { getDb } from '../db/connection.js';
 import { config } from '../config.js';
+import { embeddingCache } from './EmbeddingCache.js';
 
 export interface EmbeddingResult {
   embedding: number[];
   dimension: number;
 }
 
+// 判断是否为可重试错误（5xx、429、网络超时）
+function isRetryable(status: number | null): boolean {
+  if (status === null) return true; // 网络超时
+  if (status === 429) return true; // rate limit
+  return status >= 500;
+}
+
+// 指数退避等待
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export class EmbeddingService {
-  // 获取文本的向量嵌入
+  private maxRetries = 3;
+  private retryBaseMs = 1000;
+
+  // 使用默认全局配置嵌入（记忆模块用）
   async embed(text: string): Promise<EmbeddingResult> {
     const db = getDb();
     const settings = db.prepare('SELECT * FROM memory_settings WHERE id = 1').get() as any;
 
     if (!settings?.embedding_provider_id || !settings?.embedding_model_id) {
-      // 没有配置嵌入模型，使用默认 1536 维零向量（后续会替换为实际调用）
       console.warn('[EmbeddingService] 未配置嵌入模型，使用零向量占位');
       return {
         embedding: new Array(config.defaultEmbeddingDim).fill(0),
@@ -32,10 +48,37 @@ export class EmbeddingService {
       throw new Error('嵌入模型不存在');
     }
 
-    return this.callEmbeddingAPI(provider, model.name, text);
+    // 检查缓存
+    const cacheKey = embeddingCache.generateKey(text, provider.id, model.name);
+    const cached = embeddingCache.get(cacheKey);
+    if (cached) return cached;
+
+    // 调用 API 并写入缓存
+    const result = await this.callEmbeddingAPI(provider, model.name, text);
+    embeddingCache.set(cacheKey, result, provider.id, model.name);
+    return result;
   }
 
-  // 批量嵌入
+  // 使用指定提供商和模型进行嵌入（知识库专用），含缓存
+  async embedWith(text: string, providerId: string, modelName: string): Promise<EmbeddingResult> {
+    const db = getDb();
+    const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any;
+    if (!provider?.enabled) {
+      throw new Error('指定的嵌入提供商不可用');
+    }
+
+    // 检查缓存
+    const cacheKey = embeddingCache.generateKey(text, providerId, modelName);
+    const cached = embeddingCache.get(cacheKey);
+    if (cached) return cached;
+
+    // 调用 API 并写入缓存
+    const result = await this.callEmbeddingAPI(provider, modelName, text);
+    embeddingCache.set(cacheKey, result, providerId, modelName);
+    return result;
+  }
+
+  // 批量嵌入（使用全局配置），含缓存
   async embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
     const db = getDb();
     const settings = db.prepare('SELECT * FROM memory_settings WHERE id = 1').get() as any;
@@ -54,63 +97,129 @@ export class EmbeddingService {
       throw new Error('嵌入模型配置无效');
     }
 
-    const results: EmbeddingResult[] = [];
-    // 批量处理，每批最多 20 个
-    const batchSize = 20;
-    for (let i = 0; i < texts.length; i += batchSize) {
-      const batch = texts.slice(i, i + batchSize);
-      const url = `${provider.base_url}/embeddings`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${provider.api_key}`,
-        },
-        body: JSON.stringify({
-          model: model.name,
-          input: batch,
-        }),
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`嵌入 API 调用失败 (${response.status}): ${errText}`);
-      }
-
-      const data = await response.json() as any;
-      for (const item of data.data) {
-        results.push({
-          embedding: item.embedding,
-          dimension: item.embedding.length,
-        });
-      }
-    }
-
-    return results;
+    return this.embedBatchWithCache(texts, provider, model.name);
   }
 
-  // 使用指定提供商和模型进行嵌入（知识库专用）
-  async embedWith(text: string, providerId: string, modelName: string): Promise<EmbeddingResult> {
+  // 批量嵌入（指定配置），含缓存
+  async embedBatchWith(texts: string[], providerId: string, modelName: string): Promise<EmbeddingResult[]> {
     const db = getDb();
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any;
     if (!provider?.enabled) {
       throw new Error('指定的嵌入提供商不可用');
     }
-    return this.callEmbeddingAPI(provider, modelName, text);
+    return this.embedBatchWithCache(texts, provider, modelName);
   }
 
+  // 批量嵌入核心逻辑：逐条查缓存，未命中批量调 API
+  private async embedBatchWithCache(
+    texts: string[],
+    provider: any,
+    modelName: string
+  ): Promise<EmbeddingResult[]> {
+    // 生成所有缓存键
+    const keys = texts.map(t => embeddingCache.generateKey(t, provider.id, modelName));
+
+    // 批量查询缓存
+    const { hits, misses } = embeddingCache.getBatch(keys);
+
+    // 构建结果数组，先填充命中的
+    const results: (EmbeddingResult | null)[] = new Array(texts.length).fill(null);
+    for (let i = 0; i < keys.length; i++) {
+      const hit = hits.get(keys[i]);
+      if (hit) results[i] = hit;
+    }
+
+    // 未命中的批量调用 API
+    if (misses.length > 0) {
+      const missTexts = misses.map(i => texts[i]);
+      const batchSize = 20;
+      const cacheEntries: { key: string; result: EmbeddingResult; providerId: string; modelName: string }[] = [];
+
+      for (let i = 0; i < missTexts.length; i += batchSize) {
+        const batch = missTexts.slice(i, i + batchSize);
+        const apiResults = await this.callEmbeddingAPIBatch(provider, modelName, batch);
+
+        for (let j = 0; j < batch.length; j++) {
+          const origIdx = misses[i + j];
+          results[origIdx] = apiResults[j];
+          cacheEntries.push({
+            key: keys[origIdx],
+            result: apiResults[j],
+            providerId: provider.id,
+            modelName,
+          });
+        }
+      }
+
+      // 批量写入缓存
+      embeddingCache.setBatch(cacheEntries);
+    }
+
+    return results as EmbeddingResult[];
+  }
+
+  // 带重试的单文本嵌入 API 调用
   private async callEmbeddingAPI(provider: any, modelName: string, text: string): Promise<EmbeddingResult> {
-    const url = `${provider.base_url}/v1/embeddings`;  // 尝试 v1 路径
-    let response = await fetch(url, {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        const results = await this._doCall(provider, modelName, [text], false);
+        return results[0];
+      } catch (err) {
+        lastError = err as Error;
+        const status = (err as any).status as number | undefined;
+        if (!isRetryable(status ?? null) || attempt === this.maxRetries - 1) {
+          throw err;
+        }
+        const waitMs = this.retryBaseMs * Math.pow(2, attempt);
+        console.warn(`[EmbeddingService] 嵌入 API 调用失败，${waitMs}ms 后重试 (${attempt + 1}/${this.maxRetries}):`, (err as Error).message);
+        await delay(waitMs);
+      }
+    }
+
+    throw lastError!;
+  }
+
+  // 带重试的批量嵌入 API 调用
+  private async callEmbeddingAPIBatch(provider: any, modelName: string, texts: string[]): Promise<EmbeddingResult[]> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        return await this._doCall(provider, modelName, texts, true);
+      } catch (err) {
+        lastError = err as Error;
+        const status = (err as any).status as number | undefined;
+        if (!isRetryable(status ?? null) || attempt === this.maxRetries - 1) {
+          throw err;
+        }
+        const waitMs = this.retryBaseMs * Math.pow(2, attempt);
+        console.warn(`[EmbeddingService] 批量嵌入 API 调用失败，${waitMs}ms 后重试 (${attempt + 1}/${this.maxRetries}):`, (err as Error).message);
+        await delay(waitMs);
+      }
+    }
+
+    throw lastError!;
+  }
+
+  // 实际 HTTP 调用
+  private async _doCall(
+    provider: any,
+    modelName: string,
+    inputs: string[],
+    isBatch: boolean
+  ): Promise<EmbeddingResult[]> {
+    const url1 = `${provider.base_url}/v1/embeddings`;
+    const body = JSON.stringify({ model: modelName, input: inputs.length === 1 && !isBatch ? inputs[0] : inputs });
+
+    let response = await fetch(url1, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${provider.api_key}`,
       },
-      body: JSON.stringify({
-        model: modelName,
-        input: text,
-      }),
+      body,
     });
 
     // 如果 /v1/embeddings 失败，尝试不带 v1 的路径
@@ -122,28 +231,24 @@ export class EmbeddingService {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${provider.api_key}`,
         },
-        body: JSON.stringify({
-          model: modelName,
-          input: text,
-        }),
+        body,
       });
     }
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`嵌入 API 调用失败 (${response.status}): ${errText}`);
+      const err = new Error(`嵌入 API 调用失败 (${response.status}): ${errText}`) as any;
+      err.status = response.status;
+      throw err;
     }
 
     const data = await response.json() as any;
-    const embedding = data.data?.[0]?.embedding;
-    if (!embedding) {
-      throw new Error('嵌入 API 返回格式异常');
-    }
+    const items: any[] = data.data || [];
 
-    return {
-      embedding,
-      dimension: embedding.length,
-    };
+    return items.map((item: any) => ({
+      embedding: item.embedding,
+      dimension: item.embedding.length,
+    }));
   }
 }
 

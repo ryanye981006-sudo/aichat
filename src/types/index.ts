@@ -89,6 +89,11 @@ export interface KnowledgeBase {
   chunk_overlap: number;
   search_top_k: number;
   similarity_threshold: number;
+  chunk_strategy: 'paragraph' | 'sentence' | 'recursive';
+  enable_query_rewrite: number;
+  enable_rerank: number;
+  rerank_provider_id: string | null;
+  rerank_model_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +107,7 @@ export interface KnowledgeDocument {
   processing_status: 'pending' | 'loading' | 'chunking' | 'embedding' | 'completed' | 'error';
   chunk_count: number;
   error_message: string | null;
+  processing_config: string | null;
   created_at: string;
   updated_at: string;
 }

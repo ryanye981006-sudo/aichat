@@ -93,10 +93,16 @@ router.post('/completions', async (req: Request, res: Response) => {
     kbIds = JSON.parse(assistant.knowledge_base_ids || '[]');
   } catch { kbIds = []; }
 
+  // 知识库检索结果（在注入系统提示词前声明，用于后续引用传递）
+  let kbResults: any[] = [];
+
   if (kbIds.length > 0) {
-    const kbResults = await knowledgeService.search(kbIds, message);
+    kbResults = await knowledgeService.search(
+      kbIds, message, undefined, undefined,
+      assistant.provider_id, assistant.model_id
+    );
     if (kbResults.length > 0) {
-      const kbContext = kbResults.map((r, i) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
+      const kbContext = kbResults.map((r: any, i: number) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
       systemContent += `\n\n## 相关知识库内容\n${kbContext}`;
     }
   }
@@ -139,7 +145,15 @@ router.post('/completions', async (req: Request, res: Response) => {
   req.on('aborted', handleDisconnect);
 
   // 发送对话 ID
-  sendSSE({ type: 'meta', conversation_id: activeConvId });
+  // 构建引用信息
+  const citations = kbResults.map((r: any) => ({
+    documentName: r.documentName,
+    score: r.score,
+    snippet: r.content.slice(0, 100),
+    metadata: r.metadata || null,
+  }));
+
+  sendSSE({ type: 'meta', conversation_id: activeConvId, citations });
 
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
@@ -333,10 +347,14 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   try {
     kbIds = JSON.parse(assistant.knowledge_base_ids || '[]');
   } catch { kbIds = []; }
+  let kbResults: any[] = [];
   if (kbIds.length > 0) {
-    const kbResults = await knowledgeService.search(kbIds, lastUserMsg.content);
+    kbResults = await knowledgeService.search(
+      kbIds, lastUserMsg.content, undefined, undefined,
+      assistant.provider_id, assistant.model_id
+    );
     if (kbResults.length > 0) {
-      const kbContext = kbResults.map((r, i) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
+      const kbContext = kbResults.map((r: any, i: number) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
       systemContent += `\n\n## 相关知识库内容\n${kbContext}`;
     }
   }
@@ -369,6 +387,15 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   const sendSSE = (data: Record<string, unknown>) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
+
+  // 构建引用信息
+  const citations = kbResults.map((r: any) => ({
+    documentName: r.documentName,
+    score: r.score,
+    snippet: r.content.slice(0, 100),
+    metadata: r.metadata || null,
+  }));
+  sendSSE({ type: 'meta', conversation_id, citations });
 
   // 客户端断开连接时中止 LLM 调用
   const abortController = new AbortController();

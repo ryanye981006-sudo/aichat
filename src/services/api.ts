@@ -93,7 +93,7 @@ export function chatSSE(
   callbacks: {
     onToken: (token: string) => void;
     onParsed: (thoughtProcess: string, displayContent: string) => void;
-    onMeta: (conversationId: string) => void;
+    onMeta: (conversationId: string, citations?: any[]) => void;
     onDone: (messageId: string, content: string, thoughtProcess: string | null, metrics?: any, aborted?: boolean) => void;
     onError: (error: string) => void;
     onReasoning?: (token: string) => void;
@@ -142,7 +142,7 @@ export function chatSSE(
           const data = JSON.parse(trimmed.slice(6));
           switch (data.type) {
             case 'meta':
-              callbacks.onMeta(data.conversation_id);
+              callbacks.onMeta(data.conversation_id, data.citations);
               break;
             case 'token':
               callbacks.onToken(data.content);
@@ -184,6 +184,7 @@ export function regenerateSSE(
     onDone: (messageId: string, content: string, thoughtProcess: string | null, metrics?: any, aborted?: boolean) => void;
     onError: (error: string) => void;
     onReasoning?: (token: string) => void;
+    onMeta?: (conversationId: string, citations?: any[]) => void;
   }
 ): AbortController {
   const controller = new AbortController();
@@ -228,6 +229,9 @@ export function regenerateSSE(
         try {
           const data = JSON.parse(trimmed.slice(6));
           switch (data.type) {
+            case 'meta':
+              callbacks.onMeta?.(data.conversation_id, data.citations);
+              break;
             case 'token':
               callbacks.onToken(data.content);
               break;

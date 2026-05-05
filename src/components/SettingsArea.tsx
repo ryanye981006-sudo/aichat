@@ -67,6 +67,9 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const [kbSearch, setKbSearch] = useState('');
   const [showAddKb, setShowAddKb] = useState(false);
 
+  // 当前选中的知识库对象
+  const selectedKb = knowledgeBases.find(kb => kb.id === selectedKbId) || null;
+
   // ===== 记忆状态 =====
   const [memorySettings, setMemorySettings] = useState<MemorySettings | null>(null);
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
@@ -222,9 +225,9 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     setTestingModels(false);
   };
 
-  const handleCreateKb = async (name: string) => {
+  const handleCreateKb = async (data: Partial<KnowledgeBase>) => {
     try {
-      const kb = await knowledgeApi.create({ name });
+      const kb = await knowledgeApi.create(data);
       setKnowledgeBases(prev => [...prev, kb]);
       setShowAddKb(false);
     } catch (e) { console.error(e); }
@@ -554,6 +557,29 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                     </tbody>
                   </table>
                 </div>
+
+                {/* KB 配置摘要 + 搜索测试 */}
+                {selectedKb && (
+                  <div className="mt-5 rounded-xl border p-4" style={{ borderColor }}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="text-sm font-bold" style={{ color: textColor }}>知识库配置</h4>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-xs" style={{ color: textSecondary }}>
+                      <div>分块策略: {selectedKb.chunk_strategy || 'recursive'}</div>
+                      <div>分块大小: {selectedKb.chunk_size}</div>
+                      <div>重叠: {selectedKb.chunk_overlap}</div>
+                      <div>TopK: {selectedKb.search_top_k}</div>
+                      <div>相似度阈值: {selectedKb.similarity_threshold}</div>
+                      <div>查询改写: {selectedKb.enable_query_rewrite ? '开' : '关'}</div>
+                      <div>重排序: {selectedKb.enable_rerank ? '开' : '关'}</div>
+                    </div>
+
+                    {/* 搜索测试 */}
+                    <div className="mt-4 border-t pt-4" style={{ borderColor }}>
+                      <SearchTestPanel kbId={selectedKb.id} />
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center" style={{ color: textSecondary }}>
@@ -677,6 +703,8 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
         <AddKbModal
           onClose={() => setShowAddKb(false)}
           onSave={handleCreateKb}
+          providers={providers}
+          models={models}
         />
       )}
 
@@ -1194,27 +1222,179 @@ function FetchModelsModal({
   );
 }
 
-// ===== Add KB Modal =====
-function AddKbModal({ onClose, onSave }: { onClose: () => void; onSave: (name: string) => void }) {
+// ===== Add KB Modal (含高级设置) =====
+function AddKbModal({ onClose, onSave, providers, models }: {
+  onClose: () => void;
+  onSave: (data: Partial<KnowledgeBase>) => void;
+  providers: Provider[];
+  models: Model[];
+}) {
   const [name, setName] = useState('');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [embProviderId, setEmbProviderId] = useState('');
+  const [embModelId, setEmbModelId] = useState('');
+  const [chunkSize, setChunkSize] = useState(512);
+  const [chunkOverlap, setChunkOverlap] = useState(50);
+  const [chunkStrategy, setChunkStrategy] = useState<'paragraph' | 'sentence' | 'recursive'>('recursive');
+  const [searchTopK, setSearchTopK] = useState(5);
+  const [similarityThreshold, setSimilarityThreshold] = useState(0.7);
+  const [enableQueryRewrite, setEnableQueryRewrite] = useState(false);
+  const [enableRerank, setEnableRerank] = useState(false);
+  const [rerankProviderId, setRerankProviderId] = useState('');
+  const [rerankModelId, setRerankModelId] = useState('');
+
+  const embModels = models.filter(m => m.provider_id === embProviderId);
+  const rerankModels = models.filter(m => m.provider_id === rerankProviderId);
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-      <div className="rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
-        <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+      <div className="rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)' }}>
+        <div className="px-5 py-4 border-b flex justify-between items-center shrink-0" style={{ borderColor: 'var(--color-border)' }}>
           <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>新建知识库</h3>
           <button onClick={onClose} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
         </div>
-        <div className="p-5">
-          <label className="block text-sm mb-1.5" style={{ color: 'var(--color-text-2)' }}>知识库名称</label>
-          <input value={name} onChange={e => setName(e.target.value)} autoFocus
-            className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-            style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            placeholder="例如 技术文档库" />
+        <div className="overflow-y-auto flex-1 p-5 space-y-4">
+          {/* 名称 */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text)' }}>知识库名称</label>
+            <input value={name} onChange={e => setName(e.target.value)} autoFocus
+              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+              style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              placeholder="例如 技术文档库" />
+          </div>
+
+          {/* 嵌入模型选择 */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text)' }}>嵌入模型（可选）</label>
+            <select value={embProviderId} onChange={e => { setEmbProviderId(e.target.value); setEmbModelId(''); }}
+              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none mb-2"
+              style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+              <option value="">使用全局默认嵌入模型</option>
+              {providers.filter(p => p.enabled).map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            {embProviderId && (
+              <select value={embModelId} onChange={e => setEmbModelId(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+                style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                <option value="">选择模型</option>
+                {embModels.map(m => (
+                  <option key={m.id} value={m.id}>{m.display_name || m.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* 高级设置 */}
+          <button type="button" onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-1 text-sm font-medium transition-colors hover:opacity-80"
+            style={{ color: 'var(--color-primary)' }}>
+            <ChevronRight className={cn("w-4 h-4 transition-transform", showAdvanced && "rotate-90")} />
+            高级设置
+          </button>
+
+          {showAdvanced && (
+            <div className="space-y-4 pl-2 border-l-2" style={{ borderColor: 'var(--color-border)' }}>
+              {/* 分块策略 */}
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>分块策略</label>
+                <select value={chunkStrategy} onChange={e => setChunkStrategy(e.target.value as any)}
+                  className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
+                  style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  <option value="recursive">递归（段落→句子→强制截断）</option>
+                  <option value="paragraph">段落（仅按段落分割）</option>
+                  <option value="sentence">句子（按标点分割）</option>
+                </select>
+              </div>
+
+              {/* 分块参数 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>分块大小: {chunkSize}</label>
+                  <input type="range" min={128} max={4096} step={64} value={chunkSize}
+                    onChange={e => setChunkSize(parseInt(e.target.value))} className="w-full" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>重叠: {chunkOverlap}</label>
+                  <input type="range" min={0} max={512} step={10} value={chunkOverlap}
+                    onChange={e => setChunkOverlap(parseInt(e.target.value))} className="w-full" />
+                </div>
+              </div>
+
+              {/* 检索参数 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>TopK: {searchTopK}</label>
+                  <input type="range" min={1} max={20} step={1} value={searchTopK}
+                    onChange={e => setSearchTopK(parseInt(e.target.value))} className="w-full" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>阈值: {similarityThreshold.toFixed(1)}</label>
+                  <input type="range" min={0} max={1} step={0.05} value={similarityThreshold}
+                    onChange={e => setSimilarityThreshold(parseFloat(e.target.value))} className="w-full" />
+                </div>
+              </div>
+
+              {/* 查询改写 */}
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>启用查询改写</label>
+                <Toggle checked={enableQueryRewrite} onChange={() => setEnableQueryRewrite(!enableQueryRewrite)} />
+              </div>
+
+              {/* 重排序 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>启用重排序</label>
+                  <Toggle checked={enableRerank} onChange={() => setEnableRerank(!enableRerank)} />
+                </div>
+                {enableRerank && (
+                  <>
+                    <select value={rerankProviderId} onChange={e => { setRerankProviderId(e.target.value); setRerankModelId(''); }}
+                      className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                      style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                      <option value="">选择重排序供应商</option>
+                      {providers.filter(p => p.enabled).map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    {rerankProviderId && (
+                      <select value={rerankModelId} onChange={e => setRerankModelId(e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                        style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                        <option value="">选择重排序模型</option>
+                        {rerankModels.map(m => (
+                          <option key={m.id} value={m.id}>{m.display_name || m.name}</option>
+                        ))}
+                      </select>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </div>
-        <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="px-5 py-4 border-t flex justify-end gap-2 shrink-0" style={{ borderColor: 'var(--color-border)' }}>
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm border transition-colors"
             style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
-          <button onClick={() => { if (name.trim()) onSave(name.trim()); }}
+          <button onClick={() => {
+            if (name.trim()) {
+              onSave({
+                name: name.trim(),
+                embedding_provider_id: embProviderId || null,
+                embedding_model_id: embModelId || null,
+                chunk_strategy: chunkStrategy,
+                chunk_size: chunkSize,
+                chunk_overlap: chunkOverlap,
+                search_top_k: searchTopK,
+                similarity_threshold: similarityThreshold,
+                enable_query_rewrite: enableQueryRewrite ? 1 : 0,
+                enable_rerank: enableRerank ? 1 : 0,
+                rerank_provider_id: rerankProviderId || null,
+                rerank_model_id: rerankModelId || null,
+              });
+            }
+          }}
             className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}>确定</button>
         </div>
@@ -1306,6 +1486,68 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
             style={{ backgroundColor: 'var(--color-primary)' }}>保存</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ===== 搜索测试面板 =====
+function SearchTestPanel({ kbId }: { kbId: string }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<any[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const handleSearch = async () => {
+    if (!query.trim() || searching) return;
+    setSearching(true);
+    try {
+      const res = await knowledgeApi.search(kbId, query.trim());
+      setResults(res);
+    } catch (err) {
+      console.error('搜索测试失败:', err);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  return (
+    <div>
+      <h4 className="text-sm font-bold mb-2" style={{ color: 'var(--color-text)' }}>搜索测试</h4>
+      <div className="flex gap-2 mb-3">
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
+          placeholder="输入查询测试检索效果..."
+          className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none"
+          style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+        />
+        <button
+          onClick={handleSearch}
+          disabled={searching}
+          className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+          style={{ backgroundColor: 'var(--color-primary)' }}
+        >
+          {searching ? '搜索中...' : '搜索'}
+        </button>
+      </div>
+      {results.length > 0 && (
+        <div className="space-y-2 max-h-[300px] overflow-y-auto">
+          {results.map((r, i) => (
+            <div key={i} className="rounded-lg border p-3 text-xs"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-background-soft)' }}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-medium" style={{ color: 'var(--color-text)' }}>{r.documentName}</span>
+                <span style={{ color: 'var(--color-primary)' }}>{(r.score * 100).toFixed(0)}%</span>
+              </div>
+              <div className="leading-relaxed" style={{ color: 'var(--color-text-2)' }}>{r.content.slice(0, 200)}...</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {results.length === 0 && !searching && query && (
+        <div className="text-xs py-2" style={{ color: 'var(--color-text-3)' }}>无结果</div>
+      )}
     </div>
   );
 }

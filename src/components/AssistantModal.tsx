@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Plus } from 'lucide-react';
-import type { Assistant, Provider, Model } from '../types';
+import type { Assistant, Provider, Model, KnowledgeBase } from '../types';
 import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
+import { knowledgeApi } from '../services/api';
 import EmojiIcon from './shared/EmojiIcon';
 import EmojiPicker from './shared/EmojiPicker';
 import ModelSelectModal from './shared/ModelSelectModal';
@@ -26,7 +27,7 @@ function getNextDefaultEmoji(): string {
 }
 
 export default function AssistantModal({ isOpen, onClose, onSave, assistant, providers, models }: AssistantModalProps) {
-  const [activeTab, setActiveTab] = useState<'prompt' | 'model'>('prompt');
+  const [activeTab, setActiveTab] = useState<'prompt' | 'model' | 'knowledge'>('prompt');
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [emoji, setEmoji] = useState('🤖');
@@ -39,6 +40,22 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
   const [enableMemory, setEnableMemory] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('default');
   const [showModelSelect, setShowModelSelect] = useState(false);
+  // 知识库关联
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+  const [kbLoaded, setKbLoaded] = useState(false);
+
+  // 加载知识库列表（切换到知识库 tab 时）
+  const loadKnowledgeBases = async () => {
+    if (kbLoaded) return;
+    try {
+      const kbs = await knowledgeApi.list();
+      setKnowledgeBases(kbs as KnowledgeBase[]);
+      setKbLoaded(true);
+    } catch (err) {
+      console.error('加载知识库列表失败:', err);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -53,6 +70,11 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setContextRounds(assistant.context_rounds ?? 10);
         setEnableMemory(!!assistant.enable_memory);
         setThinkingMode(assistant.thinking_mode || 'default');
+        // 解析已关联的知识库 ID
+        try {
+          const ids = JSON.parse(assistant.knowledge_base_ids || '[]');
+          setSelectedKbIds(Array.isArray(ids) ? ids : []);
+        } catch { setSelectedKbIds([]); }
       } else {
         setName('');
         setSystemPrompt('');
@@ -67,9 +89,11 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setContextRounds(10);
         setEnableMemory(false);
         setThinkingMode('default');
+        setSelectedKbIds([]);
       }
       setActiveTab('prompt');
       setShowEmojiPicker(false);
+      setKbLoaded(false);
     }
   }, [assistant, isOpen, providers]);
 
@@ -89,6 +113,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
       context_rounds: contextRounds,
       enable_memory: enableMemory ? 1 : 0,
       thinking_mode: thinkingMode,
+      knowledge_base_ids: JSON.stringify(selectedKbIds),
     });
     onClose();
   };
@@ -116,6 +141,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
               {[
                 { key: 'prompt' as const, label: '提示词设置' },
                 { key: 'model' as const, label: '模型设置' },
+                { key: 'knowledge' as const, label: '知识库' },
               ].map(tab => (
                 <button
                   key={tab.key}
@@ -326,6 +352,73 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                       <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm",
                         enableMemory ? "left-[22px]" : "left-1")} />
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {activeTab === 'knowledge' && (
+                <div className="space-y-5">
+                  {(() => { loadKnowledgeBases(); return null; })()}
+                  <div>
+                    <label className="block text-sm font-bold mb-3" style={{ color: 'var(--color-text)' }}>
+                      关联知识库
+                    </label>
+                    <div className="text-xs mb-3" style={{ color: 'var(--color-text-3)' }}>
+                      选中的知识库将在对话时自动检索相关内容，注入到系统提示词中
+                    </div>
+                    {knowledgeBases.length === 0 ? (
+                      <div className="text-sm py-6 text-center rounded-xl border"
+                        style={{ color: 'var(--color-text-3)', borderColor: 'var(--color-border)', borderStyle: 'dashed' }}>
+                        暂无知识库，请先在设置中创建知识库
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                        {knowledgeBases.map(kb => {
+                          const isSelected = selectedKbIds.includes(kb.id);
+                          return (
+                            <label
+                              key={kb.id}
+                              className={cn(
+                                "flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-colors",
+                                isSelected ? "" : "hover:bg-black/5"
+                              )}
+                              style={{
+                                borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
+                                backgroundColor: isSelected ? 'var(--color-primary-mute)' : 'var(--color-background)',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  setSelectedKbIds(prev =>
+                                    prev.includes(kb.id)
+                                      ? prev.filter(id => id !== kb.id)
+                                      : [...prev, kb.id]
+                                  );
+                                }}
+                                className="w-4 h-4 rounded accent-current"
+                                style={{ color: 'var(--color-primary)' }}
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate" style={{ color: 'var(--color-text)' }}>
+                                  {kb.name}
+                                </div>
+                                <div className="text-xs truncate" style={{ color: 'var(--color-text-3)' }}>
+                                  {kb.embedding_model_id ? '已配置嵌入模型' : '使用全局嵌入模型'}
+                                  {' · '}分块 {kb.chunk_size} · TopK {kb.search_top_k}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {selectedKbIds.length > 0 && (
+                      <div className="text-xs mt-2" style={{ color: 'var(--color-primary)' }}>
+                        已选择 {selectedKbIds.length} 个知识库
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

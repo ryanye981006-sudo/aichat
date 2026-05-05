@@ -41,14 +41,54 @@ export class MemoryService {
         0.1
       );
 
-      // 解析 JSON 响应
-      const jsonMatch = result.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        console.warn('[MemoryService] 无法解析记忆提取结果');
+      // 增强 JSON 解析：去除 markdown 代码块标记，定位首尾括号
+      let cleaned = result.trim();
+      // 去除可能的 markdown 代码块标记
+      cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+      // 定位第一个 '[' 和最后一个 ']'
+      const firstBracket = cleaned.indexOf('[');
+      const lastBracket = cleaned.lastIndexOf(']');
+      if (firstBracket === -1 || lastBracket === -1 || lastBracket <= firstBracket) {
+        console.warn('[MemoryService] 无法从 LLM 输出中提取 JSON 数组，原始输出:', result.slice(0, 200));
         return [];
       }
-      const facts: FactExtraction[] = JSON.parse(jsonMatch[0]);
-      return Array.isArray(facts) ? facts : [];
+
+      const jsonStr = cleaned.slice(firstBracket, lastBracket + 1);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch (parseErr) {
+        console.warn('[MemoryService] JSON 解析失败，原始输出:', result.slice(0, 200));
+        return [];
+      }
+
+      if (!Array.isArray(parsed)) {
+        console.warn('[MemoryService] LLM 返回非数组格式');
+        return [];
+      }
+
+      // 逐条验证：必须有 fact 字段，action 必须是 ADD|UPDATE|DELETE
+      const validActions = ['ADD', 'UPDATE', 'DELETE'];
+      const facts: FactExtraction[] = [];
+      for (const item of parsed) {
+        if (item && typeof item === 'object' && typeof item.fact === 'string' && item.fact.trim()) {
+          const action = typeof item.action === 'string' ? item.action.toUpperCase() : '';
+          if (validActions.includes(action)) {
+            facts.push({
+              fact: item.fact.trim(),
+              action: action as 'ADD' | 'UPDATE' | 'DELETE',
+              existing_id: typeof item.existing_id === 'string' ? item.existing_id : null,
+            });
+          }
+        }
+      }
+
+      if (facts.length === 0 && parsed.length > 0) {
+        console.warn('[MemoryService] 所有条目验证失败，原始输出:', result.slice(0, 200));
+      }
+
+      return facts;
     } catch (err) {
       console.error('[MemoryService] 记忆提取失败:', err);
       return [];

@@ -7,6 +7,7 @@ import { Tooltip } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
 import EmojiIcon from './shared/EmojiIcon';
+import CitationBlock from './shared/CitationBlock';
 
 interface ChatAreaProps {
   assistant: Assistant | null;
@@ -19,6 +20,7 @@ interface ChatAreaProps {
   models: Model[];
   onStopGeneration?: () => void;
   onRegenerate: (messageId: string, thinkingMode: string) => void;
+  citations?: any[];
 }
 
 /** 格式化时间: YYYY-MM-DD HH:mm:ss */
@@ -39,7 +41,7 @@ function formatTime(iso: string): string {
 
 export default function ChatArea({
   assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
-  providers, models, onRegenerate,
+  providers, models, onRegenerate, citations = [],
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -297,6 +299,7 @@ export default function ChatArea({
           }
         );
       })()}
+          <CitationBlock citations={citations} />
           <div ref={messagesEndRef} />
         </div>
       </div>

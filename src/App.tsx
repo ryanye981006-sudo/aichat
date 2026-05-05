@@ -22,6 +22,7 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const [citations, setCitations] = useState<any[]>([]);
 
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -245,12 +246,13 @@ export default function App() {
     let currentReasoning = '';
 
     const controller = chatSSE(currentAssistantId, content, activeConvId, thinkingMode, {
-      onMeta(convId) {
+      onMeta(convId, newCitations) {
         if (convId !== activeConvId) {
           setCurrentConversationId(convId);
           activeConvId = convId;
           setStreamingConversationId(convId);
         }
+        if (newCitations) setCitations(newCitations);
       },
       onToken(token) {
         fullRawContent += token;
@@ -363,6 +365,9 @@ export default function App() {
     let currentReasoning = '';
 
     const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, {
+      onMeta(_convId, newCitations) {
+        if (newCitations) setCitations(newCitations);
+      },
       onToken(token) {
         fullRawContent += token;
         setMessages(prev => prev.map(m =>
@@ -465,6 +470,7 @@ export default function App() {
             onRegenerate={handleRegenerate}
             providers={providers}
             models={models}
+            citations={citations}
           />
         )}
       </div>
