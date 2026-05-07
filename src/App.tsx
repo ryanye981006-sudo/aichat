@@ -22,7 +22,7 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [citations, setCitations] = useState<any[]>([]);
+  const [citationsByConv, setCitationsByConv] = useState<Record<string, any[]>>({});
   const [kbSearchStatus, setKbSearchStatus] = useState<string | null>(null);
 
   // Modal
@@ -33,6 +33,13 @@ export default function App() {
   const assistantKbCacheRef = useRef<Record<string, string[]>>({});
   // 消息按会话维度缓存：流式生成中切出再切回时保留流式状态
   const messagesCacheRef = useRef<Record<string, Message[]>>({});
+  // 当前会话 ID 的同步 ref：供 SSE 异步回调判断用户是否已切走
+  const currentConversationIdRef = useRef(currentConversationId);
+  currentConversationIdRef.current = currentConversationId;
+  // 按会话维度保存 AbortController：切回后仍能停止后台 SSE
+  const abortControllersRef = useRef<Record<string, AbortController>>({});
+  // 当前会话的 citations，从 citationsByConv 按 conversationId 派生
+  const citations = currentConversationId ? (citationsByConv[currentConversationId] || []) : [];
 
   // ===== 初始化加载 =====
   useEffect(() => {
@@ -105,29 +112,47 @@ export default function App() {
       // 从历史消息中恢复 citations（取最后一条助手消息的）
       const lastAssistant = [...normalized].reverse().find((m: any) => m.role === 'assistant' && m.citations);
       if (lastAssistant) {
-        setCitations(lastAssistant.citations);
+        setCitationsByConv(prev => ({ ...prev, [conversationId]: lastAssistant.citations }));
       }
     } catch (e) { console.error(e); }
   };
 
   // ===== 助手操作 =====
   const handleSelectAssistant = useCallback(async (id: string) => {
-    // 中止当前流式，防止 token 写入错误会话
-    abortController?.abort();
+    // 不中止 SSE，让其继续在后台运行并更新缓存
+    // 只清理当前会话的全局流式标记
     setIsStreaming(false);
     setStreamingConversationId(null);
+
+    // 缓存当前会话消息（含流式中的临时消息），切回时恢复
+    if (currentConversationId) {
+      messagesCacheRef.current[currentConversationId] = messages;
+    }
 
     setCurrentAssistantId(id);
     setSidebarTab('topics');
     setIsSettingsMode(false);
-    setCitations([]);
     try {
       const convs = await conversationsApi.list(id);
       setConversations(convs);
       if (convs.length > 0) {
         const latest = convs.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0];
+        // 手动同步 ref，消除切换时 ref 与 state 的时序差
+        currentConversationIdRef.current = latest.id;
         setCurrentConversationId(latest.id);
-        loadMessages(latest.id);
+        // 若目标会话仍有活跃 SSE，恢复流式状态（停止按钮可用）
+        if (abortControllersRef.current[latest.id]) {
+          setIsStreaming(true);
+          setStreamingConversationId(latest.id);
+          setAbortController(abortControllersRef.current[latest.id]);
+        }
+        // 优先从缓存恢复
+        const cached = messagesCacheRef.current[latest.id];
+        if (cached && cached.length > 0) {
+          setMessages(cached);
+        } else {
+          loadMessages(latest.id);
+        }
       } else {
         setCurrentConversationId(null);
         setMessages([]);
@@ -137,7 +162,7 @@ export default function App() {
       setCurrentConversationId(null);
       setMessages([]);
     }
-  }, [abortController]);
+  }, [currentConversationId, messages]);
 
   const handleCreateAssistant = () => {
     setEditingAssistant(null);
@@ -200,8 +225,8 @@ export default function App() {
   const handleSelectConversation = useCallback((id: string) => {
     if (id === currentConversationId) return;
 
-    // 中止当前流式，防止 token 写入错误会话
-    abortController?.abort();
+    // 不中止 SSE，让其继续在后台运行并更新缓存
+    // 只清理当前会话的全局流式标记
     setIsStreaming(false);
     setStreamingConversationId(null);
 
@@ -209,34 +234,50 @@ export default function App() {
     if (currentConversationId) {
       messagesCacheRef.current[currentConversationId] = messages;
     }
+
+    // 手动同步 ref，消除切换时 ref 与 state 的时序差，防止 SSE 回调被误拦
+    currentConversationIdRef.current = id;
     setCurrentConversationId(id);
     setIsSettingsMode(false);
+
+    // 若目标会话仍有活跃 SSE，恢复流式状态（停止按钮可用）
+    if (abortControllersRef.current[id]) {
+      setIsStreaming(true);
+      setStreamingConversationId(id);
+      setAbortController(abortControllersRef.current[id]);
+    }
 
     // 优先从缓存恢复，缓存未命中才从服务端加载
     const cached = messagesCacheRef.current[id];
     if (cached && cached.length > 0) {
       setMessages(cached);
-      // 从缓存消息中恢复 citations
-      const lastAssistant = [...cached].reverse().find((m: any) => m.role === 'assistant' && m.citations);
-      setCitations(lastAssistant?.citations || []);
     } else {
-      setCitations([]);
       loadMessages(id);
     }
     const conv = conversations.find(c => c.id === id);
     if (conv) {
       setCurrentAssistantId(conv.assistant_id);
     }
-  }, [conversations, messages, currentConversationId, abortController]);
+  }, [conversations, messages, currentConversationId]);
 
   const handleCreateConversation = async () => {
     if (!currentAssistantId) return;
+
+    // 不中止 SSE，让其继续在后台运行并更新缓存
+    // 只清理当前会话的全局流式标记
+    setIsStreaming(false);
+    setStreamingConversationId(null);
+    if (currentConversationId) {
+      messagesCacheRef.current[currentConversationId] = messages;
+    }
+
     try {
       const conv = await conversationsApi.create(currentAssistantId, '新话题');
       setConversations(prev => [conv, ...prev]);
+      // 手动同步 ref
+      currentConversationIdRef.current = conv.id;
       setCurrentConversationId(conv.id);
       setMessages([]);
-      setCitations([]);
       setIsSettingsMode(false);
     } catch (e) { console.error(e); }
   };
@@ -256,6 +297,8 @@ export default function App() {
         setConversations(prev => [conv, ...prev]);
         activeConvId = conv.id;
         setCurrentConversationId(conv.id);
+        // 同步更新 ref，确保 SSE 回调中的 currentConversationIdRef 守卫不被误拦
+        currentConversationIdRef.current = conv.id;
       } catch (e) {
         console.error('创建对话失败:', e);
         return;
@@ -299,61 +342,124 @@ export default function App() {
 
     const controller = chatSSE(currentAssistantId, content, activeConvId, thinkingMode, {
       onMeta(convId, newCitations) {
+        // 仅当用户仍在当前会话时才更新会话 ID（避免切走后 meta 事件切换回旧会话）
         if (convId !== activeConvId) {
-          setCurrentConversationId(convId);
-          activeConvId = convId;
-          setStreamingConversationId(convId);
+          if (activeConvId === currentConversationIdRef.current) {
+            setCurrentConversationId(convId);
+            activeConvId = convId;
+            setStreamingConversationId(convId);
+            currentConversationIdRef.current = convId;
+          }
         }
-        if (newCitations !== undefined) setCitations(newCitations);
+        // citations 按会话存储到 state，无需守卫：属于其他会话的写入不影响当前 UI
+        if (newCitations !== undefined) {
+          setCitationsByConv(prev => ({ ...prev, [activeConvId]: newCitations }));
+          const cachedMsgs = messagesCacheRef.current[activeConvId];
+          if (cachedMsgs) {
+            messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+              m.role === 'assistant' ? { ...m, citations: newCitations } : m
+            );
+          }
+        }
       },
       onStatus(message: string) {
+        if (activeConvId !== currentConversationIdRef.current) return;
         setKbSearchStatus(message);
       },
       onToken(token) {
         fullRawContent += token;
+        // 同步更新缓存（后台 SSE 持续写入，切回时能拿到最新内容）
+        const cachedMsgs = messagesCacheRef.current[activeConvId];
+        if (cachedMsgs) {
+          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+            m.id === aiMsg.id ? { ...m, raw_content: fullRawContent, content: fullRawContent } : m
+          );
+        }
+        // 仅当用户仍在当前会话时更新 UI
+        if (activeConvId !== currentConversationIdRef.current) return;
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id ? { ...m, raw_content: fullRawContent, content: fullRawContent } : m
         ));
       },
       onParsed(thoughtProcess, displayContent) {
+        const cachedMsgs = messagesCacheRef.current[activeConvId];
+        if (cachedMsgs) {
+          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+            m.id === aiMsg.id ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
+          );
+        }
+        if (activeConvId !== currentConversationIdRef.current) return;
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
         ));
       },
       onReasoning(token: string) {
         currentReasoning += token;
+        const cachedMsgs = messagesCacheRef.current[activeConvId];
+        if (cachedMsgs) {
+          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+            m.id === aiMsg.id ? { ...m, thought_process: currentReasoning } : m
+          );
+        }
+        if (activeConvId !== currentConversationIdRef.current) return;
         setMessages(prev => prev.map(m =>
           m.id === aiMsg.id ? { ...m, thought_process: currentReasoning } : m
         ));
       },
       onDone(messageId, content, thoughtProcess, metrics, aborted) {
         setKbSearchStatus(null);
-        setMessages(prev => prev.map(m =>
+
+        const finalizeMessage = (prev: Message[]) => prev.map(m =>
           m.id === aiMsg.id
             ? { ...m, id: messageId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
             : m
-        ));
-        setIsStreaming(false);
-        setStreamingConversationId(null);
-        setAbortController(null);
-        delete messagesCacheRef.current[activeConvId];
-        // 仅当用户仍在当前会话时才刷新消息（避免切到其他会话时被覆盖）
-        if (activeConvId && activeConvId === currentConversationId) loadMessages(activeConvId);
-        if (currentAssistantId) loadConversations(currentAssistantId);
+        );
+
+        const isCurrentConv = activeConvId === currentConversationIdRef.current;
+        if (isCurrentConv) {
+          setMessages(finalizeMessage);
+          setIsStreaming(false);
+          setStreamingConversationId(null);
+          setAbortController(null);
+          delete abortControllersRef.current[activeConvId];
+          delete messagesCacheRef.current[activeConvId];
+          if (activeConvId) loadMessages(activeConvId);
+          if (currentAssistantId) loadConversations(currentAssistantId);
+        } else {
+          // 用户已切走：更新缓存为完成态，不污染当前会话的全局状态
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) {
+            messagesCacheRef.current[activeConvId] = finalizeMessage(cached);
+          }
+        }
       },
       onError(error) {
         setKbSearchStatus(null);
-        setMessages(prev => prev.map(m =>
+
+        const finalizeError = (prev: Message[]) => prev.map(m =>
           m.id === aiMsg.id
             ? { ...m, content: `错误: ${error}`, isStreaming: false }
             : m
-        ));
-        setIsStreaming(false);
-        setStreamingConversationId(null);
-        setAbortController(null);
-        delete messagesCacheRef.current[activeConvId];
+        );
+
+        const isCurrentConv = activeConvId === currentConversationIdRef.current;
+        if (isCurrentConv) {
+          setMessages(finalizeError);
+          setIsStreaming(false);
+          setStreamingConversationId(null);
+          setAbortController(null);
+          delete abortControllersRef.current[activeConvId];
+          delete messagesCacheRef.current[activeConvId];
+        } else {
+          // 用户已切走：更新缓存为错误态，不污染当前会话的全局状态
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) {
+            messagesCacheRef.current[activeConvId] = finalizeError(cached);
+          }
+        }
       },
     }, kbIds);
+    abortControllersRef.current[activeConvId] = controller;
     setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
 
@@ -365,7 +471,7 @@ export default function App() {
     const activeConvId = currentConversationId;
 
     // 清除旧引用，等待新 meta 事件更新
-    setCitations([]);
+    setCitationsByConv(prev => ({ ...prev, [activeConvId]: [] }));
 
     // 立即隐藏旧消息并显示 loading，不等服务端响应
     setMessages(prev => prev.map(m =>
@@ -429,69 +535,134 @@ export default function App() {
 
     const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, {
       onMeta(_convId, newCitations) {
-        if (newCitations !== undefined) setCitations(newCitations);
+        // citations 按会话存储，无需守卫：属于其他会话的写入不影响当前 UI
+        if (newCitations !== undefined) {
+          setCitationsByConv(prev => ({ ...prev, [activeConvId]: newCitations }));
+          const cachedMsgs = messagesCacheRef.current[activeConvId];
+          if (cachedMsgs) {
+            messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+              m.role === 'assistant' ? { ...m, citations: newCitations } : m
+            );
+          }
+        }
       },
       onStatus(message: string) {
+        if (activeConvId !== currentConversationIdRef.current) return;
         setKbSearchStatus(message);
       },
       onToken(token) {
         fullRawContent += token;
+        const cachedMsgs = messagesCacheRef.current[activeConvId];
+        if (cachedMsgs) {
+          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+            m.id === effectiveMessageId ? { ...m, raw_content: fullRawContent, content: fullRawContent, aborted: false } : m
+          );
+        }
+        if (activeConvId !== currentConversationIdRef.current) return;
         setMessages(prev => prev.map(m =>
           m.id === effectiveMessageId ? { ...m, raw_content: fullRawContent, content: fullRawContent, aborted: false } : m
         ));
       },
       onParsed(thoughtProcess, displayContent) {
+        const cachedMsgs = messagesCacheRef.current[activeConvId];
+        if (cachedMsgs) {
+          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+            m.id === effectiveMessageId ? { ...m, thought_process: thoughtProcess, content: displayContent, aborted: false } : m
+          );
+        }
+        if (activeConvId !== currentConversationIdRef.current) return;
         setMessages(prev => prev.map(m =>
           m.id === effectiveMessageId ? { ...m, thought_process: thoughtProcess, content: displayContent, aborted: false } : m
         ));
       },
       onReasoning(token) {
         currentReasoning += token;
+        const cachedMsgs = messagesCacheRef.current[activeConvId];
+        if (cachedMsgs) {
+          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
+            m.id === effectiveMessageId ? { ...m, thought_process: currentReasoning } : m
+          );
+        }
+        if (activeConvId !== currentConversationIdRef.current) return;
         setMessages(prev => prev.map(m =>
           m.id === effectiveMessageId ? { ...m, thought_process: currentReasoning } : m
         ));
       },
       onDone(newMsgId, content, thoughtProcess, metrics, aborted) {
         setKbSearchStatus(null);
-        setMessages(prev => prev.map(m =>
+
+        const finalizeMessage = (prev: Message[]) => prev.map(m =>
           m.id === effectiveMessageId
             ? { ...m, id: newMsgId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false }
             : m
-        ));
-        setIsStreaming(false);
-        setStreamingConversationId(null);
-        setAbortController(null);
-        delete messagesCacheRef.current[activeConvId];
-        if (activeConvId === currentConversationId) loadMessages(activeConvId);
+        );
+
+        const isCurrentConv = activeConvId === currentConversationIdRef.current;
+        if (isCurrentConv) {
+          setMessages(finalizeMessage);
+          setIsStreaming(false);
+          setStreamingConversationId(null);
+          setAbortController(null);
+          delete abortControllersRef.current[activeConvId];
+          delete messagesCacheRef.current[activeConvId];
+          if (activeConvId) loadMessages(activeConvId);
+        } else {
+          // 用户已切走：更新缓存为完成态，不污染当前会话的全局状态
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) {
+            messagesCacheRef.current[activeConvId] = finalizeMessage(cached);
+          }
+        }
       },
       onError(error) {
         setKbSearchStatus(null);
-        setMessages(prev => prev.map(m =>
+
+        const finalizeError = (prev: Message[]) => prev.map(m =>
           m.id === effectiveMessageId
             ? { ...m, content: `错误: ${error}`, isStreaming: false }
             : m
-        ));
-        setIsStreaming(false);
-        setStreamingConversationId(null);
-        setAbortController(null);
-        delete messagesCacheRef.current[activeConvId];
+        );
+
+        const isCurrentConv = activeConvId === currentConversationIdRef.current;
+        if (isCurrentConv) {
+          setMessages(finalizeError);
+          setIsStreaming(false);
+          setStreamingConversationId(null);
+          setAbortController(null);
+          delete abortControllersRef.current[activeConvId];
+          delete messagesCacheRef.current[activeConvId];
+        } else {
+          // 用户已切走：更新缓存为错误态，不污染当前会话的全局状态
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) {
+            messagesCacheRef.current[activeConvId] = finalizeError(cached);
+          }
+        }
       },
     }, kbIds);
+    abortControllersRef.current[activeConvId] = regenController;
     setAbortController(regenController);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages]);
 
   // ===== 停止生成 =====
   const handleStopGeneration = useCallback(() => {
+    // 优先从按会话维度的 map 中查找当前会话的 controller
+    const convController = currentConversationId ? abortControllersRef.current[currentConversationId] : null;
+    if (convController) {
+      convController.abort();
+      delete abortControllersRef.current[currentConversationId!];
+    }
+    // 同时清理全局状态中的 controller（兼容性）
     if (abortController) {
       abortController.abort();
       setAbortController(null);
-      setIsStreaming(false);
-      setStreamingConversationId(null);
-      setMessages(prev => prev.map(m =>
-        m.isStreaming ? { ...m, isStreaming: false, aborted: true } : m
-      ));
     }
-  }, [abortController]);
+    setIsStreaming(false);
+    setStreamingConversationId(null);
+    setMessages(prev => prev.map(m =>
+      m.isStreaming ? { ...m, isStreaming: false, aborted: true } : m
+    ));
+  }, [abortController, currentConversationId]);
 
   // ===== 深度思考模式切换 =====
   const handleThinkingModeChange = useCallback(async (mode: string) => {

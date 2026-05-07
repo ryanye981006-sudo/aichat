@@ -19,7 +19,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "ai": "^6.0.174",
     "antd": "^5.24.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.9.0",
     "clsx": "^2.1.1",
     "cors": "^2.8.5",
     "country-flag-emoji-polyfill": "^0.1.8",
