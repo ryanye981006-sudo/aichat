@@ -11,12 +11,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 const router = Router();
 
-// KB 创建/更新时支持的字段
+// KB 创建/更新时支持的字段（embedding 和 rerank 模型已硬编码到 .env）
 const KB_FIELDS = [
-  'name', 'embedding_provider_id', 'embedding_model_id',
-  'chunk_size', 'chunk_overlap', 'search_top_k', 'similarity_threshold',
+  'name', 'chunk_size', 'chunk_overlap', 'search_top_k', 'similarity_threshold',
   'chunk_strategy', 'enable_query_rewrite', 'enable_rerank',
-  'rerank_provider_id', 'rerank_model_id',
 ];
 
 // 获取所有知识库（含文档计数）
@@ -51,8 +49,6 @@ router.post('/', (req, res) => {
 
   const defaults: Record<string, any> = {
     name: '',
-    embedding_provider_id: null,
-    embedding_model_id: null,
     chunk_size: 512,
     chunk_overlap: 50,
     search_top_k: 5,
@@ -60,8 +56,6 @@ router.post('/', (req, res) => {
     chunk_strategy: 'recursive',
     enable_query_rewrite: 0,
     enable_rerank: 0,
-    rerank_provider_id: null,
-    rerank_model_id: null,
   };
 
   for (const key of KB_FIELDS) {
@@ -241,6 +235,23 @@ router.post('/:id/search', async (req, res) => {
     }
     const results = await knowledgeService.search([req.params.id], query, topK, threshold);
     res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 获取知识库分块中的图片
+router.get('/images/:chunkId', (req, res) => {
+  try {
+    const db = getDb();
+    const chunk = db.prepare('SELECT image_path, chunk_type FROM knowledge_chunks WHERE id = ?').get(req.params.chunkId) as any;
+    if (!chunk || chunk.chunk_type !== 'image' || !chunk.image_path) {
+      return res.status(404).json({ error: '图片不存在' });
+    }
+    if (!fs.existsSync(chunk.image_path)) {
+      return res.status(404).json({ error: '图片文件不存在' });
+    }
+    res.sendFile(chunk.image_path);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }

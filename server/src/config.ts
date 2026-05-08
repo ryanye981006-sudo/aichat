@@ -16,4 +16,19 @@ export const config = {
   defaultSimilarityThreshold: 0.7,
   memorySimilarityThreshold: 0.85,
   memoryExtractRounds: 10,
+
+  // 知识库多模态 embedding（阿里云 DashScope）
+  dashscopeApiKey: process.env.DASHSCOPE_API_KEY || '',
+  dashscopeBaseUrl: 'https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding',
+  dashscopeModel: 'qwen3-vl-embedding',
+  dashscopeDimension: 2560,
+
+  // 重排序（硅基流动）
+  siliconflowApiKey: process.env.SILICONFLOW_API_KEY || '',
+  siliconflowBaseUrl: process.env.SILICONFLOW_BASE_URL || 'https://api.siliconflow.cn/v1',
+  siliconflowRerankModel: process.env.SILICONFLOW_RERANK_MODEL || 'BAAI/bge-reranker-v2-m3',
+
+  // MinerU 预处理
+  mineruJwt: process.env.MINERU_JWT || '',
+  mineruBaseUrl: 'https://mineru.net/api/v4/extract/task',
 };

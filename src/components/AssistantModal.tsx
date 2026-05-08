@@ -396,7 +396,7 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                                   {kb.name}
                                 </div>
                                 <div className="text-xs truncate" style={{ color: 'var(--color-text-3)' }}>
-                                  {kb.embedding_model_id ? '已配置嵌入模型' : '使用全局嵌入模型'}
+                                  {'多模态嵌入'}
                                   {' · '}分块 {kb.chunk_size} · TopK {kb.search_top_k}
                                 </div>
                               </div>

@@ -1517,8 +1517,6 @@ function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocume
   const isEdit = !!initialData;
   const [name, setName] = useState(initialData?.name || '');
   const [showAdvanced, setShowAdvanced] = useState(!!initialData?.chunk_strategy);
-  const [embProviderId, setEmbProviderId] = useState(initialData?.embedding_provider_id || '');
-  const [embModelId, setEmbModelId] = useState(initialData?.embedding_model_id || '');
   const [chunkSize, setChunkSize] = useState(initialData?.chunk_size || 512);
   const [chunkOverlap, setChunkOverlap] = useState(initialData?.chunk_overlap || 50);
   const [chunkStrategy, setChunkStrategy] = useState<'paragraph' | 'sentence' | 'recursive'>((initialData?.chunk_strategy as any) || 'recursive');
@@ -1526,20 +1524,6 @@ function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocume
   const [similarityThreshold, setSimilarityThreshold] = useState(initialData?.similarity_threshold || 0.7);
   const [enableQueryRewrite, setEnableQueryRewrite] = useState(!!initialData?.enable_query_rewrite);
   const [enableRerank, setEnableRerank] = useState(!!initialData?.enable_rerank);
-  const [rerankProviderId, setRerankProviderId] = useState(initialData?.rerank_provider_id || '');
-  const [rerankModelId, setRerankModelId] = useState(initialData?.rerank_model_id || '');
-
-  const embModels = models.filter(m => m.provider_id === embProviderId);
-  const rerankModels = models.filter(m => m.provider_id === rerankProviderId);
-
-  const [showEmbModelSelect, setShowEmbModelSelect] = useState(false);
-  const [showRerankModelSelect, setShowRerankModelSelect] = useState(false);
-
-  const selectedEmbModel = models.find(m => m.id === embModelId);
-  const selectedEmbProvider = providers.find(p => p.id === embProviderId);
-
-  const selectedRerankModel = models.find(m => m.id === rerankModelId);
-  const selectedRerankProvider = providers.find(p => p.id === rerankProviderId);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
@@ -1558,46 +1542,16 @@ function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocume
               placeholder="例如 技术文档库" />
           </div>
 
-          {/* 嵌入模型选择 */}
+          {/* 嵌入模型信息（已硬编码为多模态模型） */}
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text)' }}>嵌入模型（可选）</label>
-            {isEdit && hasDocuments ? (
-              <>
-                <div className="w-full px-3 py-2.5 rounded-lg border text-sm opacity-60"
-                  style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                  {selectedEmbModel ? `${selectedEmbModel.display_name || selectedEmbModel.name} | ${selectedEmbProvider?.name || ''}` : '未设置'}
-                </div>
-                <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-3)' }}>
-                  知识库已包含文档，所有分块均使用同一嵌入模型，不可更改
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 px-3 py-2.5 rounded-lg border text-sm"
-                    style={{
-                      backgroundColor: 'var(--color-background-soft)',
-                      borderColor: 'var(--color-border)',
-                      color: embModelId ? 'var(--color-text)' : 'var(--color-text-3)',
-                    }}>
-                    {selectedEmbModel ? `${selectedEmbModel.display_name || selectedEmbModel.name} | ${selectedEmbProvider?.name || ''}` : '使用全局默认嵌入模型'}
-                  </div>
-                  <button type="button" onClick={() => setShowEmbModelSelect(true)}
-                    className="px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-black/5 shrink-0"
-                    style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
-                    选择模型
-                  </button>
-                </div>
-                <ModelSelectModal
-                  isOpen={showEmbModelSelect}
-                  onClose={() => setShowEmbModelSelect(false)}
-                  onSelect={(providerId, modelId) => { setEmbProviderId(providerId); setEmbModelId(modelId); }}
-                  providers={providers.filter(p => p.enabled)}
-                  models={models}
-                  currentModelId={embModelId}
-                />
-              </>
-            )}
+            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text)' }}>嵌入模型</label>
+            <div className="w-full px-3 py-2.5 rounded-lg border text-sm"
+              style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>
+              qwen3-vl-embedding（多模态）
+            </div>
+            <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-3)' }}>
+              知识库统一使用多模态嵌入模型，支持文本和图片
+            </p>
           </div>
 
           {/* 高级设置 */}
@@ -1657,38 +1611,12 @@ function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocume
               </div>
 
               {/* 重排序 */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between">
+                <div>
                   <label className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>启用重排序</label>
-                  <Toggle checked={enableRerank} onChange={() => setEnableRerank(!enableRerank)} />
+                  <p className="text-xs" style={{ color: 'var(--color-text-3)' }}>BAAI/bge-reranker-v2-m3（硅基流动）</p>
                 </div>
-                {enableRerank && (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 px-3 py-2 rounded-lg border text-sm"
-                        style={{
-                          backgroundColor: 'var(--color-background-soft)',
-                          borderColor: 'var(--color-border)',
-                          color: rerankModelId ? 'var(--color-text)' : 'var(--color-text-3)',
-                        }}>
-                        {selectedRerankModel ? `${selectedRerankModel.display_name || selectedRerankModel.name} | ${selectedRerankProvider?.name || ''}` : '未选择重排序模型'}
-                      </div>
-                      <button type="button" onClick={() => setShowRerankModelSelect(true)}
-                        className="px-3 py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-black/5 shrink-0"
-                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
-                        选择模型
-                      </button>
-                    </div>
-                    <ModelSelectModal
-                      isOpen={showRerankModelSelect}
-                      onClose={() => setShowRerankModelSelect(false)}
-                      onSelect={(providerId, modelId) => { setRerankProviderId(providerId); setRerankModelId(modelId); }}
-                      providers={providers.filter(p => p.enabled)}
-                      models={models}
-                      currentModelId={rerankModelId}
-                    />
-                  </>
-                )}
+                <Toggle checked={enableRerank} onChange={() => setEnableRerank(!enableRerank)} />
               </div>
             </div>
           )}
@@ -1700,8 +1628,6 @@ function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocume
             if (name.trim()) {
               onSave({
                 name: name.trim(),
-                embedding_provider_id: embProviderId || null,
-                embedding_model_id: embModelId || null,
                 chunk_strategy: chunkStrategy,
                 chunk_size: chunkSize,
                 chunk_overlap: chunkOverlap,
@@ -1709,8 +1635,6 @@ function AddKbModal({ onClose, onSave, providers, models, initialData, hasDocume
                 similarity_threshold: similarityThreshold,
                 enable_query_rewrite: enableQueryRewrite ? 1 : 0,
                 enable_rerank: enableRerank ? 1 : 0,
-                rerank_provider_id: rerankProviderId || null,
-                rerank_model_id: rerankModelId || null,
               });
             }
           }}
