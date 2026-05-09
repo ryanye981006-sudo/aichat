@@ -123,3 +123,23 @@ export interface MemoryEntry {
   created_at: string;
   updated_at: string;
 }
+
+// 聊天文件附件
+export interface FileAttachment {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;         // "image/png" | "application/pdf" | ...
+  dataUrl: string;          // 缩略图/预览 base64 data URL
+  category: 'image' | 'document' | 'text';
+}
+
+// 后端文件上传响应
+export interface ChatFileUploadResult {
+  filePath: string;
+  fileName: string;
+  mimeType: string;
+  extractedText: string;
+  isScannedPdf: boolean;
+  images?: { mimeType: string; dataUrl: string }[];
+}

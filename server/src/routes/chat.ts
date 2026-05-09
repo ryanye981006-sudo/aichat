@@ -4,7 +4,11 @@ import { getDb } from '../db/connection.js';
 import { aiSdkService as aiService } from '../services/AiSdkService.js';
 import { memoryService } from '../services/MemoryService.js';
 import { knowledgeService } from '../services/KnowledgeService.js';
+import { loaderService } from '../services/LoaderService.js';
+import { upload } from '../services/FileStorage.js';
+import { cleanText } from '../utils/cleanText.js';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
 
 const router = Router();
 
@@ -597,6 +601,88 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
   endResponse();
+});
+
+// ===== 聊天文件上传（文档解析 + 扫描件 OCR 决策）=====
+router.post('/upload-file', upload.single('file'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: '未选择文件' });
+      return;
+    }
+
+    const isVisionModel = req.body.isVisionModel === 'true';
+    const filePath = req.file.path;
+    const mimeType = req.file.mimetype;
+
+    // 调用 LoaderService 解析文件
+    const loadResult = await loaderService.loadFile(filePath, mimeType);
+
+    // 文本清洗
+    const cleanedText = cleanText(loadResult.text);
+
+    // 扫描件检测（仅 PDF 文件）
+    const isPdf = mimeType === 'application/pdf';
+    let isScanned = false;
+    if (isPdf) {
+      const pageCount = loadResult.images.length > 0 ? Math.max(...loadResult.images.map(i => i.page), 1) : undefined;
+      isScanned = loaderService.isScannedPdf(loadResult, pageCount);
+    }
+
+    let images: { mimeType: string; dataUrl: string }[] | undefined;
+
+    if (isPdf && isScanned && loadResult.text.trim().length < 100) {
+      if (isVisionModel) {
+        // Vision 模型：渲染 PDF 页面为 PNG，模型直接阅读
+        try {
+          const pages = await loaderService.renderPagesAsImages(filePath);
+          images = pages.map(p => ({
+            mimeType: p.mimeType,
+            dataUrl: `data:${p.mimeType};base64,${p.data.toString('base64')}`,
+          }));
+          console.log(`[Chat] 扫描件 PDF，vision 模型，渲染 ${pages.length} 页 PNG`);
+        } catch (err) {
+          console.warn('[Chat] PDF 页面渲染失败，回退到文本:', (err as Error).message);
+        }
+      } else {
+        // 非 Vision 模型：DeepSeek-OCR（PDF 直接输入，不渲染）
+        try {
+          const { deepSeekOcrService } = await import('../services/DeepSeekOcrService.js');
+          const ocrResult = await deepSeekOcrService.extractPdf(fs.readFileSync(filePath));
+          if (ocrResult?.text) {
+            res.json({
+              filePath: req.file.filename,
+              fileName: req.file.originalname,
+              mimeType,
+              extractedText: cleanText(ocrResult.text),
+              isScannedPdf: true,
+            });
+            return;
+          }
+        } catch (err) {
+          console.warn('[Chat] DeepSeek-OCR 失败:', (err as Error).message);
+        }
+        // OCR 失败 → 返回错误提示
+        res.status(422).json({
+          error: '此 PDF 为扫描件且当前模型不支持视觉能力。请切换到视觉模型（如 GPT-4o / Claude）或手动提取文字后发送。',
+          isScannedPdf: true,
+        });
+        return;
+      }
+    }
+
+    res.json({
+      filePath: req.file.filename,
+      fileName: req.file.originalname,
+      mimeType,
+      extractedText: cleanedText,
+      isScannedPdf: isScanned,
+      images,
+    });
+  } catch (err) {
+    console.error('[Chat] 文件上传处理失败:', err);
+    res.status(500).json({ error: `文件处理失败: ${(err as Error).message}` });
+  }
 });
 
 export default router;

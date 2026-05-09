@@ -68,6 +68,43 @@ export class LoaderService {
     return { text: content, images: [], tables: [] };
   }
 
+  /**
+   * 判断 PDF 是否为扫描件/纯图片（提取文本量极少）
+   * 阈值：总文本 < 100 字符 或 平均每页 < 50 字符
+   */
+  isScannedPdf(loadResult: LoadResult, pageCount?: number): boolean {
+    const textLen = (loadResult.text || '').trim().length;
+    if (textLen < 100) return true;
+    if (pageCount && pageCount > 0 && textLen / pageCount < 50) return true;
+    return false;
+  }
+
+  /**
+   * 将 PDF 逐页渲染为 PNG（供 vision 模型直接阅读扫描件）
+   * 返回每页的 PNG Buffer 和 mimeType
+   */
+  async renderPagesAsImages(filePath: string): Promise<{ data: Buffer; mimeType: string; page: number }[]> {
+    const mupdf = await import('mupdf');
+    const data = fs.readFileSync(filePath);
+    const doc = mupdf.Document.openDocument(data, 'application/pdf');
+    const pages: { data: Buffer; mimeType: string; page: number }[] = [];
+
+    for (let i = 0; i < doc.countPages(); i++) {
+      const page = doc.loadPage(i);
+      const pix = page.toPixmap(mupdf.Matrix.identity, mupdf.ColorSpace.DeviceRGB);
+      if (pix) {
+        const png = pix.asPNG();
+        pages.push({
+          data: Buffer.from(png),
+          mimeType: 'image/png',
+          page: i + 1,
+        });
+      }
+    }
+
+    return pages;
+  }
+
   private async loadPdf(filePath: string): Promise<LoadResult> {
     try {
       const mupdf = await import('mupdf');
@@ -94,7 +131,7 @@ export class LoaderService {
                 try {
                   const pix = image.toPixmap();
                   if (pix) {
-                    const png = pix.toPNG();
+                    const png = pix.asPNG();
                     images.push({
                       data: Buffer.from(png),
                       mimeType: 'image/png',

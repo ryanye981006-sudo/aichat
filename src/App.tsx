@@ -283,7 +283,7 @@ export default function App() {
   };
 
   // ===== 发送消息 =====
-  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', kbIds: string[] = []) => {
+  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', kbIds: string[] = [], files?: import('./types').FileAttachment[]) => {
     if (!currentAssistantId) return;
 
     // 只阻止当前活跃会话在流式时发送消息
@@ -458,7 +458,7 @@ export default function App() {
           }
         }
       },
-    }, kbIds);
+    }, kbIds, files);
     abortControllersRef.current[activeConvId] = controller;
     setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);

@@ -31,4 +31,8 @@ export const config = {
   // MinerU 预处理
   mineruJwt: process.env.MINERU_JWT || '',
   mineruBaseUrl: 'https://mineru.net/api/v4/extract/task',
+
+  // DeepSeek-OCR（硅基流动，替代 MinerU）
+  ocrModel: process.env.SILICONFLOW_OCR_MODEL || 'deepseek-ai/DeepSeek-OCR',
+  ocrPrompt: process.env.OCR_PROMPT || '<image>\nFree OCR.',
 };

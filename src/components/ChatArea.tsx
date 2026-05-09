@@ -1,10 +1,11 @@
 import { FormEvent, useState, useRef, useEffect, useCallback } from 'react';
-import type { Assistant, Message, Provider, Model, KnowledgeBase } from '../types';
+import type { Assistant, Message, Provider, Model, KnowledgeBase, FileAttachment } from '../types';
 import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
+import { getFileCategory, checkFileAllowed, getSupportedExts } from '../lib/modelCapabilities';
 import { knowledgeApi } from '../services/api';
 import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle, X } from 'lucide-react';
-import { Tooltip } from 'antd';
+import { Tooltip, message as antMessage } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
 import EmojiIcon from './shared/EmojiIcon';
@@ -13,7 +14,7 @@ import CitationBlock from './shared/CitationBlock';
 interface ChatAreaProps {
   assistant: Assistant | null;
   messages: Message[];
-  onSendMessage: (content: string, thinkingMode: string, kbIds: string[]) => void;
+  onSendMessage: (content: string, thinkingMode: string, kbIds: string[], files?: FileAttachment[]) => void;
   isStreaming: boolean;
   onEditAssistant: (assistant: Assistant) => void;
   onThinkingModeChange?: (mode: string) => void;
@@ -72,6 +73,13 @@ export default function ChatArea({
   };
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>(getCachedKbIds);
 
+  // 文件附件
+  const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropAreaRef = useRef<HTMLDivElement>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   // 助手切换时恢复缓存
   useEffect(() => {
     setSelectedKbIds(getCachedKbIds());
@@ -109,11 +117,125 @@ export default function ChatArea({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showThinkDropdown, showKbDropdown]);
 
+  // 读取文件为 dataUrl
+  const readFileAsDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // 将 File → FileAttachment
+  const fileToAttachment = async (file: File): Promise<FileAttachment> => {
+    const ext = file.name.split('.').pop() || '';
+    const category = getFileCategory(ext);
+    const dataUrl = category === 'image' ? await readFileAsDataUrl(file) : '';
+    return {
+      id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: file.name,
+      size: file.size,
+      mimeType: file.type || 'application/octet-stream',
+      dataUrl,
+      category,
+    };
+  };
+
+  // 验证文件是否被当前模型支持
+  const validateFile = (file: File, model?: Model | null): string | null => {
+    const ext = file.name.split('.').pop() || '';
+    return checkFileAllowed(ext, model);
+  };
+
+  // 添加文件（含能力检查）
+  const handleAddFiles = useCallback(async (files: FileList | File[]) => {
+    if (!assistant) return;
+
+    const model = models.find(m => m.id === assistant.model_id);
+    const newAttachments: FileAttachment[] = [];
+    let blockedCount = 0;
+
+    for (const file of files) {
+      const error = validateFile(file, model || null);
+      if (error) {
+        antMessage.warning(`${file.name}: ${error}`);
+        blockedCount++;
+        continue;
+      }
+      const attachment = await fileToAttachment(file);
+      newAttachments.push(attachment);
+    }
+
+    if (newAttachments.length > 0) {
+      setAttachedFiles(prev => [...prev, ...newAttachments]);
+    }
+  }, [assistant, models]);
+
+  // 从 <input type="file"> 选择
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      handleAddFiles(e.target.files);
+    }
+    // 重置 input 以便重复选择同名文件
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // 拖放处理
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleAddFiles(e.dataTransfer.files);
+    }
+  };
+
+  // 粘贴处理
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+
+    if (imageFiles.length > 0) {
+      handleAddFiles(imageFiles);
+    }
+  };
+
+  // 移除已附加文件
+  const removeAttachment = (fileId: string) => {
+    setAttachedFiles(prev => prev.filter(f => f.id !== fileId));
+  };
+
+  // 计算 accept 属性值
+  const acceptExts = getSupportedExts(models.find(m => m.id === assistant?.model_id));
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isStreaming) return;
-    onSendMessage(input.trim(), thinkingMode, selectedKbIds);
+    if ((!input.trim() && attachedFiles.length === 0) || isStreaming) return;
+    onSendMessage(input.trim() || '请分析下列文件', thinkingMode, selectedKbIds, attachedFiles.length > 0 ? attachedFiles : undefined);
     setInput('');
+    setAttachedFiles([]);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -349,14 +471,46 @@ export default function ChatArea({
       <div className="absolute bottom-0 left-0 right-0 px-6 md:px-10 pb-4 pt-10 bg-gradient-to-t from-[var(--color-background)] via-[var(--color-background)] to-transparent pointer-events-none">
         <div className="w-full pointer-events-auto">
           <div className="rounded-2xl border shadow-sm transition-all flex flex-col"
+            ref={dropAreaRef}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             style={{
               backgroundColor: 'var(--color-background-soft)',
-              borderColor: 'var(--color-border)',
+              borderColor: isDragOver ? 'var(--color-primary)' : 'var(--color-border)',
             }}>
+            {/* 文件预览区 */}
+            {attachedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-4 pt-3 pb-1">
+                {attachedFiles.map((f) => (
+                  <div key={f.id} className="relative group flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs"
+                    style={{ backgroundColor: 'var(--color-background)', borderColor: 'var(--color-border)' }}>
+                    {f.category === 'image' && f.dataUrl ? (
+                      <img src={f.dataUrl} alt={f.name} className="w-8 h-8 rounded object-cover" />
+                    ) : (
+                      <div className="w-8 h-8 rounded flex items-center justify-center text-[10px] font-bold"
+                        style={{ backgroundColor: 'var(--color-background-soft)', color: 'var(--color-text-3)' }}>
+                        {f.name.split('.').pop()?.toUpperCase().slice(0, 3) || 'FILE'}
+                      </div>
+                    )}
+                    <span className="max-w-[120px] truncate" style={{ color: 'var(--color-text)' }}>{f.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(f.id)}
+                      className="p-0.5 rounded-full hover:bg-red-100 transition-colors"
+                    >
+                      <X className="w-3 h-3" style={{ color: 'var(--color-text-3)' }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <textarea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder="请输入消息... (Enter 发送, Shift+Enter 换行)"
               className="w-full resize-none bg-transparent py-3.5 px-4 outline-none text-sm placeholder:opacity-50"
               style={{
@@ -510,10 +664,21 @@ export default function ChatArea({
                   <span className="font-bold">{usedRounds}/{maxRounds}</span>
                   <span>轮</span>
                 </div>
-                <button type="button" className="p-2 rounded-full transition-colors hover:bg-black/5"
-                  style={{ color: 'var(--color-icon)' }}>
-                  <Paperclip className="w-4 h-4" />
-                </button>
+                <Tooltip title="上传文件 (支持拖放和粘贴)">
+                  <button type="button" className="p-2 rounded-full transition-colors hover:bg-black/5"
+                    style={{ color: 'var(--color-icon)' }}
+                    onClick={() => fileInputRef.current?.click()}>
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+                </Tooltip>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept={acceptExts.map(ext => ext.startsWith('.') ? ext : `.${ext}`).join(',')}
+                  onChange={handleFileSelect}
+                />
                 {isStreaming ? (
                   <button
                     type="button"
@@ -528,10 +693,10 @@ export default function ChatArea({
                   <button
                     type="button"
                     onClick={handleSubmit}
-                    disabled={!input.trim()}
+                    disabled={!input.trim() && attachedFiles.length === 0}
                     className={cn(
                       "p-2 rounded-full transition-colors flex items-center justify-center text-white w-8 h-8",
-                      input.trim() ? "opacity-100 hover:opacity-80" : "opacity-30 cursor-not-allowed"
+                      (input.trim() || attachedFiles.length > 0) ? "opacity-100 hover:opacity-80" : "opacity-30 cursor-not-allowed"
                     )}
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >

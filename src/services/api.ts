@@ -90,6 +90,20 @@ export const knowledgeApi = {
     request<any[]>(`/knowledge/${kbId}/search`, { method: 'POST', body: JSON.stringify({ query, topK, threshold }) }),
 };
 
+// ===== 聊天文件上传 API =====
+export const chatFileApi = {
+  upload: (file: File, isVisionModel: boolean) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('isVisionModel', String(isVisionModel));
+    return fetch(`${BASE_URL}/chat/upload-file`, { method: 'POST', body: formData }).then(async (r) => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || '文件上传失败');
+      return data as import('../types').ChatFileUploadResult;
+    });
+  },
+};
+
 // ===== 聊天 SSE =====
 export function chatSSE(
   assistantId: string,
@@ -106,6 +120,7 @@ export function chatSSE(
     onStatus?: (message: string) => void;
   },
   kbIds?: string[],
+  files?: import('../types').FileAttachment[],
 ): AbortController {
   const controller = new AbortController();
 
@@ -117,6 +132,7 @@ export function chatSSE(
       conversation_id: conversationId,
       message,
       thinking_mode: thinkingMode,
+      files: files,
       kb_ids: kbIds,
     }),
     signal: controller.signal,
