@@ -42,7 +42,7 @@ export class UserProfileService {
     if (entries.length === 0) return '';
 
     const lines = entries.map(e => `- ${e.key}: ${e.value}`);
-    return `\n\n## 用户信息\n以下是用户主动声明的个人信息，请参考这些信息来个性化回复：\n${lines.join('\n')}`;
+    return `\n\n## 用户信息\n以下是已知的关于用户的信息。请将它们作为背景知识，在对话中自然结合使用，不要反复提及或刻意强调：\n${lines.join('\n')}`;
   }
 }
 

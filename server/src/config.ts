@@ -19,7 +19,9 @@ export const config = {
 
   // 三层时间模型（L0 轮数从助手 context_rounds 读取，此处不再写死）
   chunkSimilarityThreshold: 0.65,
+  maxTurnsPerChunk: 8,                  // chunk 轮数上限，超过强制闭合
   sessionIdleTimeoutMs: 3600000,       // 1 小时
+  llmTimeoutMs: 300000,                  // LLM 调用超时（聊天 + 记忆提取）
 
   // 时间衰减
   timeDecayHalfLifeDays: 60,

@@ -195,6 +195,7 @@ export interface FactExtraction {
   topic?: string;
   action: 'ADD' | 'UPDATE' | 'DELETE';
   existing_id: string | null;
+  importance?: number;  // LLM 提供的重要度评分 (0~1)，优先于启发式算法
 }
 
 export interface MemorySearchResult {

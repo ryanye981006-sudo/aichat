@@ -29,6 +29,13 @@ export class ConversationChunkService {
 
   // 检查 chunk 边界：比较相邻 turn 的语义相似度
   // 前提：turn > L0_RETENTION_ROUNDS
+  // 确保存在 open chunk（同步方法，用于首次创建防竞态）
+  ensureOpenChunk(conversationId: string, startTurnIndex: number): string {
+    const existing = this.getOpenChunk(conversationId);
+    if (existing) return existing.id;
+    return this.createChunk(conversationId, startTurnIndex);
+  }
+
   checkChunkBoundary(conversationId: string): { closed: boolean; chunkId?: string } {
     const db = getDb();
     const currentChunk = this.getOpenChunk(conversationId);
@@ -67,6 +74,15 @@ export class ConversationChunkService {
     const turnN = recentTurns[1];
     const turnN1 = recentTurns[0];
 
+    // 轮数上限强制闭合：防止话题长时间不变时 chunk 永不闭合
+    const chunkTurnCount = turnN.turn_index - currentChunk.start_turn_index + 1;
+    if (chunkTurnCount >= config.maxTurnsPerChunk) {
+      console.log(`[ConversationChunk] 轮数上限强制闭合 | chunk=${currentChunk.id} | turns=${chunkTurnCount} | max=${config.maxTurnsPerChunk}`);
+      const closedChunkId = this.closeChunk(conversationId);
+      const newChunkId = this.createChunk(conversationId, turnN.turn_index);
+      return { closed: true, chunkId: newChunkId };
+    }
+
     try {
       const [embN, embN1] = await Promise.all([
         embeddingService.embed(turnN.content),
@@ -98,13 +114,15 @@ export class ConversationChunkService {
     const content = this.buildChunkContent(chunk.id);
     const finalTurnRow = db.prepare(
       'SELECT MAX(turn_index) AS end_turn FROM chunk_messages WHERE chunk_id = ?'
-    ).get(chunk.id) as { end_turn: number };
+    ).get(chunk.id) as { end_turn: number | null };
+
+    const endTurnIndex = finalTurnRow?.end_turn ?? chunk.end_turn_index ?? chunk.start_turn_index;
 
     db.prepare(`
       UPDATE conversation_chunks
       SET status = 'closed', content = ?, end_turn_index = ?, closed_at = datetime('now'), updated_at = datetime('now')
       WHERE id = ?
-    `).run(content, finalTurnRow.end_turn, chunk.id);
+    `).run(content, endTurnIndex, chunk.id);
 
     // 异步写入 embedding
     embeddingService.embed(content).then(({ embedding }) => {
@@ -138,6 +156,35 @@ export class ConversationChunkService {
     ).run(endTurnIndex, chunkId);
   }
 
+  // 将对话中尚未归档的消息批量关联到 chunk（幂等，用于首次进入 L1 时回填历史消息）
+  addAllMessagesToChunk(chunkId: string, conversationId: string): void {
+    const db = getDb();
+    const rows = db.prepare(`
+      SELECT m.id, m.turn_index, m.role, m.content FROM messages m
+      WHERE m.conversation_id = ?
+        AND m.memory_enabled = 1 AND m.privacy_mode = 0
+        AND m.id NOT IN (SELECT cm.message_id FROM chunk_messages cm)
+      ORDER BY m.turn_index ASC
+    `).all(conversationId) as { id: string; turn_index: number; role: string; content: string }[];
+
+    if (rows.length === 0) return;
+
+    const insert = db.prepare(
+      'INSERT OR IGNORE INTO chunk_messages (id, chunk_id, message_id, turn_index, role) VALUES (?, ?, ?, ?, ?)'
+    );
+    const updateChunk = db.prepare(
+      "UPDATE conversation_chunks SET content = content || ?, updated_at = datetime('now') WHERE id = ?"
+    );
+
+    const batchInsert = db.transaction(() => {
+      for (const row of rows) {
+        insert.run(uuidv4(), chunkId, row.id, row.turn_index, row.role);
+        updateChunk.run(`${row.role}: ${row.content}\n`, chunkId);
+      }
+    });
+    batchInsert();
+  }
+
   // 将消息关联到 chunk
   addTurnToChunk(chunkId: string, messageId: string, turnIndex: number, role: string, content: string): void {
     const db = getDb();
@@ -157,7 +204,7 @@ export class ConversationChunkService {
     const db = getDb();
     const messages = db.prepare(
       'SELECT cm.role, m.content FROM chunk_messages cm JOIN messages m ON cm.message_id = m.id WHERE cm.chunk_id = ? ORDER BY cm.turn_index ASC'
-    ).all() as { role: string; content: string }[];
+    ).all(chunkId) as { role: string; content: string }[];
 
     return messages.map(m => `${m.role}: ${m.content}`).join('\n');
   }
@@ -182,7 +229,7 @@ export class ConversationChunkService {
         JOIN messages m ON cm.message_id = m.id
         WHERE cm.chunk_id = ? AND m.memory_enabled = 1 AND m.privacy_mode = 0
         ORDER BY cm.turn_index ASC
-      `).all() as { role: string; content: string; message_id: string }[];
+      `).all(chunkId) as { role: string; content: string; message_id: string }[];
 
       if (messages.length === 0) {
         // 无符合条件的消息，直接标记为已提取
@@ -207,11 +254,11 @@ export class ConversationChunkService {
         try {
           switch (fact.action) {
             case 'ADD':
-              await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId);
+              await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId, undefined, fact.importance);
               break;
             case 'UPDATE':
               if (fact.existing_id) {
-                const newId = await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId);
+                const newId = await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId, undefined, fact.importance);
                 await memoryService.invalidateMemory(fact.existing_id, newId);
               }
               break;
@@ -242,23 +289,29 @@ export class ConversationChunkService {
   // 处理过期/空闲会话（触发 B：会话空闲超时触发）
   async processStaleConversations(idleThresholdMs: number): Promise<void> {
     const db = getDb();
-    const idleThreshold = new Date(Date.now() - idleThresholdMs).toISOString();
+    // 使用 SQLite datetime 函数统一比较，避免 JS ISO 与 SQLite local time 格式不一致
+    const thresholdSeconds = Math.floor(idleThresholdMs / 1000);
 
-    // 扫描 open/closed 状态的过期 chunk
+    // 扫描 open/closed 状态的过期 chunk（同时检查 conversation 和 chunk 的 updated_at）
     const staleChunks = db.prepare(`
       SELECT cc.* FROM conversation_chunks cc
       JOIN conversations c ON cc.conversation_id = c.id
-      WHERE c.updated_at < ? AND cc.status IN ('open', 'closed')
-    `).all(idleThreshold) as ConversationChunk[];
+      WHERE (strftime('%s', 'now') - strftime('%s', c.updated_at)) > ?
+        AND cc.status IN ('open', 'closed')
+    `).all(thresholdSeconds) as ConversationChunk[];
+
+    if (staleChunks.length > 0) {
+      console.log(`[ConversationChunk] 扫描到 ${staleChunks.length} 个过期 chunk | open=${staleChunks.filter(c => c.status === 'open').length} closed=${staleChunks.filter(c => c.status === 'closed').length}`);
+    }
 
     // 额外扫描 stuck 在 extracting 状态的 chunk（30 分钟超时）
-    const stuckThreshold = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     const stuckChunks = db.prepare(`
       SELECT * FROM conversation_chunks
-      WHERE status = 'extracting' AND updated_at < ?
-    `).all(stuckThreshold) as ConversationChunk[];
+      WHERE status = 'extracting' AND (strftime('%s', 'now') - strftime('%s', updated_at)) > 1800
+    `).all() as ConversationChunk[];
 
     for (const chunk of stuckChunks) {
+      console.log(`[ConversationChunk] 重置 stuck chunk | id=${chunk.id}`);
       db.prepare(
         "UPDATE conversation_chunks SET status = 'closed', updated_at = datetime('now') WHERE id = ?"
       ).run(chunk.id);
@@ -266,8 +319,10 @@ export class ConversationChunkService {
 
     for (const chunk of staleChunks) {
       if (chunk.status === 'open') {
+        console.log(`[ConversationChunk] 空闲闭合 chunk | id=${chunk.id} | conv=${chunk.conversation_id}`);
         this.closeChunk(chunk.conversation_id);
       } else if (chunk.status === 'closed') {
+        console.log(`[ConversationChunk] 空闲提取 chunk | id=${chunk.id}`);
         this.extractFromChunk(chunk.id).catch(err => {
           console.error('[ConversationChunk] 空闲提取失败:', err);
         });
@@ -276,6 +331,7 @@ export class ConversationChunkService {
 
     // 重试 stuck chunk
     for (const chunk of stuckChunks) {
+      console.log(`[ConversationChunk] 重试 stuck chunk 提取 | id=${chunk.id}`);
       this.extractFromChunk(chunk.id).catch(err => {
         console.error('[ConversationChunk] stuck chunk 重试失败:', err);
       });

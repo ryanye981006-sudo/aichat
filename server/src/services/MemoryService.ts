@@ -33,7 +33,8 @@ export class MemoryService {
         ],
         settings.llm_model_id,
         settings.llm_provider_id,
-        0.1
+        0.1,
+        AbortSignal.timeout(config.llmTimeoutMs)
       );
 
       // 增强 JSON 解析：去除 markdown 代码块标记，定位首尾括号
@@ -67,11 +68,15 @@ export class MemoryService {
         if (item && typeof item === 'object' && typeof item.fact === 'string' && item.fact.trim()) {
           const action = typeof item.action === 'string' ? item.action.toUpperCase() : '';
           if (validActions.includes(action)) {
+            const importance = typeof (item as any).importance === 'number'
+              && (item as any).importance >= 0 && (item as any).importance <= 1
+              ? (item as any).importance : undefined;
             facts.push({
               fact: item.fact.trim(),
               topic: typeof (item as any).topic === 'string' ? (item as any).topic : undefined,
               action: action as 'ADD' | 'UPDATE' | 'DELETE',
               existing_id: typeof item.existing_id === 'string' ? item.existing_id : null,
+              importance,
             });
           }
         }
@@ -82,7 +87,11 @@ export class MemoryService {
       }
 
       return facts;
-    } catch (err) {
+    } catch (err: any) {
+      // 超时错误重新抛出，让 extractFromChunk 重置 chunk 为 closed 等待重试
+      if (err?.name === 'AbortError' || err?.cause?.name === 'TimeoutError') {
+        throw err;
+      }
       console.error('[MemoryService] 记忆提取失败:', err);
       return [];
     }
@@ -97,14 +106,14 @@ export class MemoryService {
       try {
         switch (fact.action) {
           case 'ADD':
-            await this.addMemory(fact.fact);
+            await this.addMemory(fact.fact, fact.importance);
             break;
           case 'UPDATE':
             if (fact.existing_id) {
-              const newId = await this.addMemoryWithSource(fact.fact, fact.topic || null, '');
+              const newId = await this.addMemoryWithSource(fact.fact, fact.topic || null, '', undefined, fact.importance);
               await this.invalidateMemory(fact.existing_id, newId);
             } else {
-              await this.addMemory(fact.fact);
+              await this.addMemory(fact.fact, fact.importance);
             }
             break;
           case 'DELETE':
@@ -157,7 +166,7 @@ export class MemoryService {
   // --- 新增方法 ---
 
   // 带 source_links 的记忆存储
-  async addMemoryWithSource(content: string, topic: string | null, chunkId: string, sourceConversationId?: string): Promise<string> {
+  async addMemoryWithSource(content: string, topic: string | null, chunkId: string, sourceConversationId?: string, llmImportance?: number): Promise<string> {
     const db = getDb();
     const hash = sha256(content);
 
@@ -168,7 +177,8 @@ export class MemoryService {
       return existing.id;
     }
 
-    const { importance, specificity, properNouns, numbers, totalWords } = this.computeImportance(content);
+    const heuristic = this.computeImportance(content, topic);
+    const importance = typeof llmImportance === 'number' ? llmImportance : heuristic.importance;
     const { embedding } = await embeddingService.embed(content);
 
     // 向量去重
@@ -188,10 +198,10 @@ export class MemoryService {
 
     const id = uuidv4();
     const metadata = JSON.stringify({
-      proper_noun_count: properNouns,
-      number_count: numbers,
-      total_word_count: totalWords,
-      specificity,
+      proper_noun_count: heuristic.properNouns,
+      number_count: heuristic.numbers,
+      total_word_count: heuristic.totalWords,
+      specificity: heuristic.specificity,
       extraction_trigger: 'topic_shift',
       source_chunk_ids: [chunkId],
       proper_nouns: [],
@@ -213,19 +223,51 @@ export class MemoryService {
     return id;
   }
 
-  // 计算重要度：CPU 启发式
-  computeImportance(content: string): {
+  // 计算重要度：CPU 启发式（LLM 未提供 importance 时的回退方案）
+  // 改进点：① 中文按字符密度计算，避免 split(/\s+/) 对中文失效
+  //         ② 对数缩放避免长文本被低估  ③ 话题类别加权
+  computeImportance(content: string, topic?: string | null): {
     importance: number;
     specificity: number;
     properNouns: number;
     numbers: number;
     totalWords: number;
   } {
-    const words = content.split(/\s+/).length || 1;
-    const properNouns = (content.match(/[A-Z][a-z]+|[A-Z]{2,}|[一-鿿]{2,}/g) || []).length;
+    // 计算单元数：中文按字符，英文按词（约5字符/词），取较大者避免短文本被高估
+    const stripped = content.replace(/\s+/g, '');
+    const cjkChars = (stripped.match(/[一-鿿㐀-䶿]/g) || []).length;
+    const nonCjkChars = stripped.length - cjkChars;
+    const estimatedWords = Math.max(content.split(/\s+/).length, nonCjkChars / 5);
+    const totalUnits = Math.max(cjkChars + estimatedWords, 3);
+
+    // 命名实体检测
+    const enProperNouns = (content.match(/[A-Z][a-z]+|[A-Z]{2,}/g) || []).length;
+    const cnProperNouns = cjkChars > 0 ? (content.match(/[一-鿿]{2,4}/g) || []).length : 0;
+    const properNouns = enProperNouns + Math.min(cnProperNouns, Math.floor(totalUnits / 3));
     const numbers = (content.match(/\d+/g) || []).length;
-    const value = Math.min((properNouns + numbers) / words, 1);
-    return { importance: value, specificity: value, properNouns, numbers, totalWords: words };
+
+    // 信息密度：对数缩放 + 实体密度
+    const logLen = Math.log(Math.max(totalUnits, 3));
+    const entityScore = Math.min((properNouns * logLen) / Math.max(totalUnits, 1), 0.6);
+    const numberScore = Math.min(numbers * 0.1, 0.25);
+
+    let value = Math.min(entityScore + numberScore, 1);
+
+    // 话题加权：高价值话题获得小幅加成
+    if (topic) {
+      const highWeight = ['个人信息', '职业信息', '技术偏好', '项目背景'];
+      const medWeight = ['日程计划', '联系方式', '教育背景'];
+      if (highWeight.some(t => topic.includes(t))) {
+        value = Math.min(value + 0.12, 1);
+      } else if (medWeight.some(t => topic.includes(t))) {
+        value = Math.min(value + 0.08, 1);
+      }
+    }
+
+    // 保底分：能被提取为记忆的事实至少有一定重要性
+    value = Math.max(value, 0.08);
+
+    return { importance: value, specificity: value, properNouns, numbers, totalWords: totalUnits };
   }
 
   // 失效旧记忆（保留完整变更链路）
@@ -290,7 +332,7 @@ export class MemoryService {
     ).run(id, memoryId, chunkId);
   }
 
-  private async addMemory(content: string): Promise<string> {
+  private async addMemory(content: string, llmImportance?: number): Promise<string> {
     const db = getDb();
     const hash = sha256(content);
 
@@ -312,10 +354,11 @@ export class MemoryService {
         if (sim >= config.memorySimilarityThreshold) return m.id;
       }
 
-      const { importance, specificity, properNouns, numbers, totalWords } = this.computeImportance(content);
+      const heuristic = this.computeImportance(content);
+      const importance = typeof llmImportance === 'number' ? llmImportance : heuristic.importance;
       const id = uuidv4();
       const metadata = JSON.stringify({
-        proper_noun_count: properNouns, number_count: numbers, total_word_count: totalWords, specificity,
+        proper_noun_count: heuristic.properNouns, number_count: heuristic.numbers, total_word_count: heuristic.totalWords, specificity: heuristic.specificity,
         extraction_trigger: 'legacy', source_chunk_ids: [],
       });
 

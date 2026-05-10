@@ -229,6 +229,9 @@ export class AiSdkService {
 
       // 如果被中止，不触发 onComplete
       if (abortSignal?.aborted) {
+        if (abortSignal.reason?.name === 'TimeoutError') {
+          callbacks.onError(new Error('请求超时，请稍后重试'));
+        }
         return
       }
 
@@ -261,6 +264,10 @@ export class AiSdkService {
       callbacks.onComplete(fullText, metrics, reasoningText || undefined)
     } catch (err: any) {
       if (err?.name === 'AbortError' || abortSignal?.aborted) {
+        // 超时触发的 abort（与用户主动取消区分）
+        if (abortSignal?.reason?.name === 'TimeoutError') {
+          callbacks.onError(new Error('请求超时，请稍后重试'));
+        }
         return // 用户主动取消，不报错
       }
       console.error('[AiSdkService] streamText 异常:', err)

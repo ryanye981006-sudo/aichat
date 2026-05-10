@@ -11,6 +11,7 @@ import { toolDefinitionBuilder } from '../services/ToolDefinitionBuilder.js';
 import { toolExecutor } from '../services/ToolExecutor.js';
 import { upload } from '../services/FileStorage.js';
 import { cleanText } from '../utils/cleanText.js';
+import { config } from '../config.js';
 
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
@@ -302,15 +303,13 @@ router.post('/completions', async (req: Request, res: Response) => {
 
         endResponse();
 
-        // 异步: 超出 L0（助手配置的 context_rounds）后进入 chunk 关联 + 边界检测
+        // 超出 L0 后进入 L1 chunk 归档 + 边界检测
         if (turnIndex > rounds) {
-          const chunk = conversationChunkService.getOpenChunk(activeConvId);
-          if (chunk) {
-            // 将用户消息和助手消息关联到 chunk
-            conversationChunkService.addTurnToChunk(chunk.id, userMsgId, turnIndex, 'user', message);
-            conversationChunkService.addTurnToChunk(chunk.id, aiMsgId, turnIndex, 'assistant', parsedContent);
-          }
-          // 检查 chunk 边界（内部会创建 chunk 如果尚不存在）
+          // 同步确保 open chunk 存在，防止首次进入 L1 时竞态导致消息丢失
+          const chunkId = conversationChunkService.ensureOpenChunk(activeConvId, turnIndex);
+          // 批量归档所有尚未关联的消息（幂等：首次回填历史，后续仅补增量）
+          conversationChunkService.addAllMessagesToChunk(chunkId, activeConvId);
+          // 异步检查边界（语义相似度 + 轮数上限强制闭合）
           conversationChunkService.checkChunkBoundaryAsync(activeConvId)
             .then(result => {
               if (result.closed) {
@@ -331,7 +330,7 @@ router.post('/completions', async (req: Request, res: Response) => {
         sendSSE({ type: 'tool_result', toolCallId, toolName, result });
       },
     },
-    abortController.signal,
+    AbortSignal.any([abortController.signal, AbortSignal.timeout(config.llmTimeoutMs)]),
     thinkingMode,
     requestStartTime,
     tools,
@@ -625,7 +624,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         sendSSE({ type: 'tool_result', toolCallId, toolName, result });
       },
     },
-    abortController.signal,
+    AbortSignal.any([abortController.signal, AbortSignal.timeout(config.llmTimeoutMs)]),
     regenThinkingMode,
     requestStartTime,
     regenTools,
