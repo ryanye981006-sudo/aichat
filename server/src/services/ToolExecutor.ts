@@ -12,12 +12,19 @@ export class ToolExecutor {
         return memoryRetrievalService.recallContext(args.memory_id);
       case 'recall_sources':
         return memoryRetrievalService.recallSources(args.memory_id, args.source_ids);
-      case 'web_search':
-        return webSearchService.search({
+      case 'web_search': {
+        const results = await webSearchService.search({
           query: args.query,
           maxResults: args.max_results ?? 5,
           timeRange: args.time_range || 'NoLimit',
         });
+        const citationData = webSearchService.formatCitations(results);
+        return {
+          raw: results,
+          formatted: citationData.formatted,
+          citations: citationData.citations,
+        };
+      }
       case 'web_fetch':
         return webSearchService.fetchPage(args.url, args.mode || 'basic');
       default:

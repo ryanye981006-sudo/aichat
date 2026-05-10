@@ -369,7 +369,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     thinkingMode,
     requestStartTime,
     tools,
-    config.maxTotalToolRounds, // maxSteps：全局总轮次硬上限
+    Object.keys(tools || {}).length * config.maxToolCallPerTool, // maxSteps：工具数 × 单工具上限，不设全局轮次限制
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -697,7 +697,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     regenThinkingMode,
     requestStartTime,
     regenTools,
-    config.maxTotalToolRounds,
+    Object.keys(regenTools || {}).length * config.maxToolCallPerTool,
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）

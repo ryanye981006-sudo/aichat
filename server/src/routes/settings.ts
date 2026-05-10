@@ -2,18 +2,24 @@
 import { Router } from 'express';
 import { getDb } from '../db/connection.js';
 import { webSearchService } from '../services/WebSearchService.js';
+import { config } from '../config.js';
 
 const router = Router();
 
 // 获取 IQS Key 配置状态（不返回完整 Key，仅返回是否已配置）
+// 检查优先级：user_profile DB → .env / config
 router.get('/iqs-key', (_req, res) => {
   const db = getDb();
   const row = db.prepare("SELECT value FROM user_profile WHERE key = 'iqs_api_key'").get() as any;
-  const configured = !!(row?.value);
-  // 返回 Key 前4位 + 后4位 供前端识别
-  const key = row?.value || '';
-  const masked = key.length > 8 ? `${key.slice(0, 4)}***${key.slice(-4)}` : (key ? '***' : '');
-  res.json({ configured, masked });
+  // .env / config 中的 key 优先级更高（服务器级别配置）
+  const envKey = config.iqsApiKey || '';
+  const dbKey = row?.value || '';
+  const effectiveKey = dbKey || envKey;
+  const configured = !!(effectiveKey);
+  const masked = effectiveKey.length > 8
+    ? `${effectiveKey.slice(0, 4)}***${effectiveKey.slice(-4)}`
+    : (effectiveKey ? '***' : '');
+  res.json({ configured, masked, source: dbKey ? 'user_profile' : (envKey ? 'env' : null) });
 });
 
 // 更新 IQS Key

@@ -41,6 +41,22 @@ export class WebSearchService {
     if (!this.provider) throw new Error('搜索引擎未配置，请在设置中填写 IQS API Key');
     return this.provider.fetchPage(url, mode);
   }
+
+  /** 将搜索结果格式化为带引用编号的文本，LLM 可在回答中用 [citation:N](URL) 引用 */
+  formatCitations(results: SearchResult[]): { formatted: string; citations: Array<{ id: number; title: string; url: string; snippet: string }> } {
+    const citations = results.map((r, i) => ({
+      id: i + 1,
+      title: r.title,
+      url: r.url,
+      snippet: r.snippet || '',
+    }));
+
+    const formatted = citations.map(c =>
+      `[citation:${c.id}] ${c.title}\nURL: ${c.url}\n摘要: ${c.snippet}`
+    ).join('\n\n');
+
+    return { formatted, citations };
+  }
 }
 
 export const webSearchService = new WebSearchService();

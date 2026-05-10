@@ -53,6 +53,101 @@ function formatTime(iso: string): string {
   return `${Y}-${M}-${D} ${h}:${m}:${s}`;
 }
 
+// 根据工具调用间的参数关联，计算每条工具调用的嵌套深度
+function computeNestedToolCalls(toolCalls: any[]): { toolCall: any; depth: number }[] {
+  const result: { toolCall: any; depth: number }[] = [];
+
+  for (let i = 0; i < toolCalls.length; i++) {
+    const tc = toolCalls[i];
+    let depth = 0;
+
+    // recall_context(memory_id) → 父节点是最近一条包含该 memory_id 的 search_memory 或 recall_context
+    if (tc.toolName === 'recall_context' && tc.args?.memory_id) {
+      const memId = tc.args.memory_id;
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = toolCalls[j];
+        const prevMemIds = extractMemoryIds(prev);
+        if (prevMemIds.has(memId)) {
+          depth = result[j].depth + 1;
+          break;
+        }
+      }
+    }
+
+    // recall_sources(memory_id) → 父节点是最近一条包含该 memory_id 的工具调用
+    if (tc.toolName === 'recall_sources' && tc.args?.memory_id) {
+      const memId = tc.args.memory_id;
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = toolCalls[j];
+        const prevMemIds = extractMemoryIds(prev);
+        if (prevMemIds.has(memId)) {
+          depth = result[j].depth + 1;
+          break;
+        }
+      }
+    }
+
+    // web_fetch(url) → 父节点是最近一条包含该 url 的 web_search
+    if (tc.toolName === 'web_fetch' && tc.args?.url) {
+      const fetchUrl = tc.args.url;
+      for (let j = i - 1; j >= 0; j--) {
+        const prev = toolCalls[j];
+        if (prev.toolName === 'web_search') {
+          const prevUrls = extractSearchUrls(prev);
+          if (prevUrls.has(fetchUrl)) {
+            depth = result[j].depth + 1;
+            break;
+          }
+        }
+      }
+    }
+
+    result.push({ toolCall: tc, depth });
+  }
+
+  return result;
+}
+
+// 从工具调用结果中提取所有 memory_id
+function extractMemoryIds(tc: any): Set<string> {
+  const ids = new Set<string>();
+  if (!tc.result) return ids;
+
+  // search_memory 返回记忆数组，每项有 memory_id
+  if (tc.toolName === 'search_memory') {
+    const items = Array.isArray(tc.result) ? tc.result : (tc.result?.raw || tc.result?.output);
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        if (item.memory_id) ids.add(item.memory_id);
+      }
+    }
+  }
+
+  // recall_context/recall_sources 的参数中有 memory_id
+  if (tc.args?.memory_id) {
+    ids.add(tc.args.memory_id);
+  }
+
+  return ids;
+}
+
+// 从 web_search 结果中提取所有 URL
+function extractSearchUrls(tc: any): Set<string> {
+  const urls = new Set<string>();
+  if (!tc.result) return urls;
+
+  if (tc.toolName === 'web_search') {
+    const items = Array.isArray(tc.result) ? tc.result : (tc.result?.raw || tc.result?.output);
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        if (item.url) urls.add(item.url);
+      }
+    }
+  }
+
+  return urls;
+}
+
 export default function ChatArea({
   assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
   providers, models, onRegenerate, citations = [], kbSearchStatus, assistantKbCacheRef,
@@ -374,8 +469,8 @@ export default function ChatArea({
                   {/* 工具调用块 */}
                   {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
                     <div className="flex flex-col gap-0.5 w-full">
-                      {message.toolCalls.map(tc => (
-                        <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
+                      {computeNestedToolCalls(message.toolCalls).map(({ toolCall: tc, depth }) => (
+                        <ToolCallBlock key={tc.toolCallId} toolCall={tc} depth={depth} />
                       ))}
                     </div>
                   )}

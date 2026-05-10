@@ -19,7 +19,7 @@ export const config = {
 
   // 三层时间模型（L0 轮数从助手 context_rounds 读取，此处不再写死）
   chunkSimilarityThreshold: 0.65,
-  maxTurnsPerChunk: 8,                  // chunk 轮数上限，超过强制闭合
+  maxTurnsPerChunk: 12,                 // chunk 轮数上限，超过强制闭合
   sessionIdleTimeoutMs: 3600000,       // 1 小时
   llmTimeoutMs: 300000,                  // LLM 调用超时（聊天 + 记忆提取）
 
@@ -69,7 +69,6 @@ export const config = {
   iqsApiKey: process.env.IQS_API_KEY || '',
   iqsBaseUrl: 'https://cloud-iqs.aliyuncs.com',
 
-  // 工具调用轮次（每个工具独立计数）
-  maxToolCallPerTool: 3,       // 每个工具独立上限（5 个工具各 3 次）
-  maxTotalToolRounds: 6,       // 全局总轮次硬上限
+  // 工具调用：每个工具独立上限，不做全局轮次限制
+  maxToolCallPerTool: 3,       // 每个工具独立上限（search_memory/recall_context/recall_sources/web_search/web_fetch 各 3 次）
 };
