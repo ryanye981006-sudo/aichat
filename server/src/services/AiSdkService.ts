@@ -215,7 +215,8 @@ export class AiSdkService {
             break
           }
           case 'tool-result': {
-            callbacks.onToolResult?.(part.toolCallId, part.toolName, part.result)
+            const p = part as any
+            callbacks.onToolResult?.(p.toolCallId, p.toolName, p.output)
             break
           }
           case 'error': {
