@@ -225,7 +225,7 @@ export class EmbeddingService {
 
     // 优先使用缓存的已验证 URL
     const preferredUrl = getPreferredUrl(provider.id, 'embeddings', provider.base_url);
-    let response = await fetch(preferredUrl, fetchOptions(AbortSignal.timeout(10000)));
+    let response = await fetch(preferredUrl, fetchOptions(AbortSignal.timeout(30000)));
 
     if (response.ok) {
       markSuccess(provider.id, 'embeddings', preferredUrl);

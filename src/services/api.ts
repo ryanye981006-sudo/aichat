@@ -27,7 +27,7 @@ export const assistantsApi = {
 export const conversationsApi = {
   list: (assistantId?: string) => request<any[]>(`/conversations${assistantId ? `?assistantId=${assistantId}` : ''}`),
   create: (assistant_id: string, title?: string) => request<any>('/conversations', { method: 'POST', body: JSON.stringify({ assistant_id, title }) }),
-  update: (id: string, title: string) => request<any>(`/conversations/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  update: (id: string, data: { title?: string; privacy_mode?: number }) => request<any>(`/conversations/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   remove: (id: string) => request<any>(`/conversations/${id}`, { method: 'DELETE' }),
 };
 
@@ -61,10 +61,21 @@ export const modelsApi = {
 export const memoryApi = {
   getSettings: () => request<any>('/memory/settings'),
   updateSettings: (data: any) => request<any>('/memory/settings', { method: 'PUT', body: JSON.stringify(data) }),
-  list: (search?: string) => request<any[]>(`/memory${search ? `?search=${encodeURIComponent(search)}` : ''}`),
-  search: (query: string) => request<any[]>('/memory/search', { method: 'POST', body: JSON.stringify({ query }) }),
+  list: (search?: string, status?: string) => request<any[]>(`/memory${search ? `?search=${encodeURIComponent(search)}` : ''}${status ? `${search ? '&' : '?'}status=${status}` : ''}`),
+  search: (query: string, limit?: number) => request<any[]>('/memory/search', { method: 'POST', body: JSON.stringify({ query, limit }) }),
   create: (content: string) => request<any>('/memory', { method: 'POST', body: JSON.stringify({ content }) }),
+  getDetail: (id: string) => request<any>(`/memory/${id}`),
+  getSources: (id: string) => request<any[]>(`/memory/${id}/sources`),
+  update: (id: string, content: string) => request<any>(`/memory/${id}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+  remove: (id: string) => request<any>(`/memory/${id}`, { method: 'DELETE' }),
   history: (memoryId?: string) => request<any[]>(`/memory/history${memoryId ? `?memoryId=${memoryId}` : ''}`),
+};
+
+// ===== 个人信息 API =====
+export const profileApi = {
+  list: () => request<any[]>('/profile'),
+  update: (data: Record<string, string>) => request<any[]>('/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  remove: (key: string) => request<any>(`/profile/${key}`, { method: 'DELETE' }),
 };
 
 // ===== 知识库 API =====
@@ -118,6 +129,8 @@ export function chatSSE(
     onError: (error: string) => void;
     onReasoning?: (token: string) => void;
     onStatus?: (message: string) => void;
+    onToolCall?: (toolCallId: string, toolName: string, args: any) => void;
+    onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
   },
   kbIds?: string[],
   files?: import('../types').FileAttachment[],
@@ -187,6 +200,12 @@ export function chatSSE(
             case 'error':
               callbacks.onError(data.message);
               break;
+            case 'tool_call':
+              callbacks.onToolCall?.(data.toolCallId, data.toolName, data.args);
+              break;
+            case 'tool_result':
+              callbacks.onToolResult?.(data.toolCallId, data.toolName, data.result);
+              break;
           }
         } catch { /* 忽略解析错误 */ }
       }
@@ -214,6 +233,8 @@ export function regenerateSSE(
     onReasoning?: (token: string) => void;
     onMeta?: (conversationId: string, citations?: any[]) => void;
     onStatus?: (message: string) => void;
+    onToolCall?: (toolCallId: string, toolName: string, args: any) => void;
+    onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
   },
   kbIds?: string[],
 ): AbortController {

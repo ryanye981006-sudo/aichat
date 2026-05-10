@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model, KnowledgeBase, KnowledgeDocument, MemorySettings, MemoryEntry } from '../types';
 import { cn } from '../lib/utils';
-import { providersApi, modelsApi, knowledgeApi, memoryApi } from '../services/api';
-import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil, ExternalLink } from 'lucide-react';
+import { providersApi, modelsApi, knowledgeApi, memoryApi, profileApi } from '../services/api';
+import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil, ExternalLink, User } from 'lucide-react';
 import ModelSelectModal from './shared/ModelSelectModal';
 
 // 分块策略中文名
@@ -46,7 +46,7 @@ function normalizeBaseUrl(url: string): string {
 }
 
 interface SettingsAreaProps {
-  activeTab: 'model' | 'rag' | 'memory';
+  activeTab: 'model' | 'rag' | 'memory' | 'profile';
 }
 
 export default function SettingsArea({ activeTab }: SettingsAreaProps) {
@@ -110,12 +110,23 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const [memories, setMemories] = useState<MemoryEntry[]>([]);
   const [memorySearch, setMemorySearch] = useState('');
   const [showMemorySettings, setShowMemorySettings] = useState(false);
+  const [editingMemory, setEditingMemory] = useState<MemoryEntry | null>(null);
+  const [viewingMemoryId, setViewingMemoryId] = useState<string | null>(null);
+  const [memoryDetail, setMemoryDetail] = useState<any | null>(null);
+  const [loadingMemoryDetail, setLoadingMemoryDetail] = useState(false);
+  const [confirmDeleteMemoryId, setConfirmDeleteMemoryId] = useState<string | null>(null);
+
+  // ===== 个人信息状态 =====
+  const [profileEntries, setProfileEntries] = useState<{ key: string; value: string }[]>([]);
+  const [editingProfile, setEditingProfile] = useState<{ key: string; value: string } | null>(null);
+  const [showAddProfile, setShowAddProfile] = useState(false);
 
   // 加载数据
   useEffect(() => {
     loadProviders();
     loadKnowledgeBases();
     loadMemoryData();
+    loadProfileData();
   }, []);
 
   const loadProviders = async () => {
@@ -147,6 +158,13 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
       setMemorySettings(settings);
       setMemories(mems);
     } catch (e) { console.error('加载记忆失败:', e); }
+  };
+
+  const loadProfileData = async () => {
+    try {
+      const entries = await profileApi.list();
+      setProfileEntries(entries);
+    } catch (e) { console.error('加载个人信息失败:', e); }
   };
 
   const selectedProvider = providers.find(p => p.id === selectedProviderId);
@@ -345,6 +363,56 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
       const s = await memoryApi.updateSettings(updates);
       setMemorySettings(s);
       setShowMemorySettings(false);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleViewMemorySources = async (memoryId: string) => {
+    setViewingMemoryId(memoryId);
+    setMemoryDetail(null);
+    setLoadingMemoryDetail(true);
+    try {
+      const detail = await memoryApi.getDetail(memoryId);
+      setMemoryDetail(detail);
+    } catch (e) { console.error('加载记忆详情失败:', e); }
+    finally { setLoadingMemoryDetail(false); }
+  };
+
+  const handleUpdateMemory = async (memoryId: string, content: string) => {
+    try {
+      await memoryApi.update(memoryId, content);
+      await loadMemoryData();
+      setEditingMemory(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteMemory = async (memoryId: string) => {
+    try {
+      await memoryApi.remove(memoryId);
+      await loadMemoryData();
+      setConfirmDeleteMemoryId(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleAddProfile = async (key: string, value: string) => {
+    try {
+      await profileApi.update({ [key]: value });
+      await loadProfileData();
+      setShowAddProfile(false);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleUpdateProfile = async (key: string, value: string) => {
+    try {
+      await profileApi.update({ [key]: value });
+      await loadProfileData();
+      setEditingProfile(null);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteProfile = async (key: string) => {
+    try {
+      await profileApi.remove(key);
+      await loadProfileData();
     } catch (e) { console.error(e); }
   };
 
@@ -788,29 +856,147 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                 <thead style={{ backgroundColor: bgMute }}>
                   <tr style={{ color: textSecondary }}>
                     <th className="px-4 py-3 text-left font-medium">内容</th>
-                    <th className="px-4 py-3 text-left font-medium w-36">创建时间</th>
-                    <th className="px-4 py-3 text-left font-medium w-20">状态</th>
+                    <th className="px-4 py-3 text-left font-medium w-20">主题</th>
+                    <th className="px-4 py-3 text-left font-medium w-16">重要度</th>
+                    <th className="px-4 py-3 text-left font-medium w-14">访问</th>
+                    <th className="px-4 py-3 text-left font-medium w-32">创建时间</th>
+                    <th className="px-4 py-3 text-left font-medium w-16">状态</th>
+                    <th className="px-4 py-3 text-left font-medium w-24">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {memories.filter(m => !memorySearch || m.content.includes(memorySearch)).map(m => (
-                    <tr key={m.id} className="border-t" style={{ borderColor }}>
-                      <td className="px-4 py-3.5" style={{ color: textColor }}>{m.content}</td>
+                  {memories.filter(m => !memorySearch || m.content.includes(memorySearch)).map(m => {
+                    const importancePct = Math.round((m.importance || 0) * 100);
+                    return (
+                    <tr key={m.id} className="border-t transition-colors hover:bg-black/5" style={{ borderColor }}>
+                      <td className="px-4 py-3.5 max-w-[300px]" style={{ color: textColor }}>
+                        <div className="truncate" title={m.content}>{m.content}</div>
+                      </td>
                       <td className="px-4 py-3.5" style={{ color: textSecondary }}>
-                        {new Date(m.created_at).toLocaleString()}
+                        {m.topic ? (
+                          <span className="text-xs px-2 py-0.5 rounded-full border" style={{ borderColor, color: textSecondary }}>{m.topic}</span>
+                        ) : '-'}
+                      </td>
+                      <td className="px-4 py-3.5" style={{ color: textSecondary }}>
+                        {m.importance > 0 ? (
+                          <span className={cn("text-xs font-medium", importancePct >= 50 ? 'text-amber-500' : 'text-gray-400')}>
+                            {importancePct}%
+                          </span>
+                        ) : '-'}
+                      </td>
+                      <td className="px-4 py-3.5" style={{ color: textSecondary }}>
+                        {m.access_count || 0}
+                      </td>
+                      <td className="px-4 py-3.5" style={{ color: textSecondary }}>
+                        {new Date(m.created_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                       </td>
                       <td className="px-4 py-3.5">
                         <span className={cn("text-xs px-2 py-0.5 rounded-full",
-                          m.is_deleted ? 'text-red-500 bg-red-50' : 'text-green-500 bg-green-50')}>
-                          {m.is_deleted ? '已删除' : '活跃'}
+                          m.status === 'invalidated' ? 'text-red-500 bg-red-50' : 'text-green-500 bg-green-50')}>
+                          {m.status === 'invalidated' ? '已失效' : '活跃'}
                         </span>
+                      </td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setEditingMemory(m)}
+                            className="p-1 rounded transition-colors hover:bg-black/10" title="编辑"
+                            style={{ color: textSecondary }}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleViewMemorySources(m.id)}
+                            className="p-1 rounded transition-colors hover:bg-black/10" title="查看来源"
+                            style={{ color: primaryColor }}>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteMemoryId(m.id)}
+                            className="p-1 rounded transition-colors hover:bg-red-50" title="删除"
+                            style={{ color: '#ef4444' }}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    );
+                  })}
+                  {memories.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-10 text-center" style={{ color: textSecondary }}>
+                        暂无记忆，开启全局记忆后系统会自动从对话中提取
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 个人信息 Tab ===== */}
+      {activeTab === 'profile' && (
+        <div className="flex flex-col h-full w-full overflow-hidden p-4 gap-4">
+          <div className="rounded-xl border p-4 flex items-center justify-between shrink-0"
+            style={{ backgroundColor: 'var(--color-background)', borderColor }}>
+            <div>
+              <div className="text-lg font-bold" style={{ color: textColor }}>个人信息</div>
+              <div className="text-xs mt-1" style={{ color: textSecondary }}>
+                设置您的个人背景信息，AI 在回复时会参考这些信息
+              </div>
+            </div>
+            <button
+              onClick={() => { setShowAddProfile(true); }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors hover:opacity-80 text-white"
+              style={{ backgroundColor: primaryColor }}>
+              <Plus className="w-4 h-4" /> 添加
+            </button>
+          </div>
+
+          <div className="flex-1 rounded-xl border flex flex-col overflow-hidden"
+            style={{ backgroundColor: 'var(--color-background)', borderColor }}>
+            <div className="p-4 border-b" style={{ borderColor }}>
+              <div className="text-sm font-medium" style={{ color: textColor }}>
+                信息条目 ({profileEntries.length})
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead style={{ backgroundColor: bgMute }}>
+                  <tr style={{ color: textSecondary }}>
+                    <th className="px-4 py-3 text-left font-medium w-36">键</th>
+                    <th className="px-4 py-3 text-left font-medium">值</th>
+                    <th className="px-4 py-3 text-left font-medium w-24">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {profileEntries.map(entry => (
+                    <tr key={entry.key} className="border-t transition-colors hover:bg-black/5" style={{ borderColor }}>
+                      <td className="px-4 py-3.5 font-medium" style={{ color: textColor }}>{entry.key}</td>
+                      <td className="px-4 py-3.5" style={{ color: textSecondary }}>{entry.value}</td>
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setEditingProfile(entry)}
+                            className="p-1 rounded transition-colors hover:bg-black/10" title="编辑"
+                            style={{ color: textSecondary }}>
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProfile(entry.key)}
+                            className="p-1 rounded transition-colors hover:bg-red-50" title="删除"
+                            style={{ color: '#ef4444' }}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
-                  {memories.length === 0 && (
+                  {profileEntries.length === 0 && (
                     <tr>
                       <td colSpan={3} className="px-4 py-10 text-center" style={{ color: textSecondary }}>
-                        暂无记忆，开启全局记忆后系统会自动从对话中提取
+                        暂无个人信息，点击"添加"按钮设置您的背景信息
                       </td>
                     </tr>
                   )}
@@ -1127,6 +1313,147 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
           </div>
         );
       })()}
+
+      {/* 编辑记忆弹窗 */}
+      {editingMemory && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-lg overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>编辑记忆</h3>
+              <button onClick={() => setEditingMemory(null)} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>记忆内容</label>
+                <textarea
+                  defaultValue={editingMemory.content}
+                  id="edit-memory-content"
+                  className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none resize-none"
+                  style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)', minHeight: '120px' }}
+                />
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => setEditingMemory(null)} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+              <button onClick={() => {
+                const textarea = document.getElementById('edit-memory-content') as HTMLTextAreaElement;
+                if (textarea?.value.trim()) handleUpdateMemory(editingMemory.id, textarea.value.trim());
+              }}
+                className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: primaryColor }}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 查看记忆来源弹窗 */}
+      {viewingMemoryId && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>记忆来源追溯</h3>
+              <button onClick={() => { setViewingMemoryId(null); setMemoryDetail(null); }} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-5">
+              {loadingMemoryDetail ? (
+                <div className="flex items-center justify-center py-12 gap-2" style={{ color: 'var(--color-text-3)' }}>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="text-sm">加载来源信息...</span>
+                </div>
+              ) : memoryDetail ? (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-sm font-medium mb-2" style={{ color: 'var(--color-text-2)' }}>记忆内容</div>
+                    <div className="p-3 rounded-lg border text-sm" style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                      {memoryDetail.content}
+                    </div>
+                  </div>
+                  {memoryDetail.topic && (
+                    <div>
+                      <span className="text-sm font-medium" style={{ color: 'var(--color-text-2)' }}>主题: </span>
+                      <span className="text-sm" style={{ color: 'var(--color-text)' }}>{memoryDetail.topic}</span>
+                    </div>
+                  )}
+                  <div>
+                    <div className="text-sm font-medium mb-2" style={{ color: 'var(--color-text-2)' }}>关联的 Chunk</div>
+                    {memoryDetail.sources && memoryDetail.sources.length > 0 ? (
+                      <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                        <table className="w-full text-sm">
+                          <thead style={{ backgroundColor: 'var(--color-background-soft)' }}>
+                            <tr style={{ color: 'var(--color-text-2)' }}>
+                              <th className="px-3 py-2.5 text-left font-medium">Chunk ID</th>
+                              <th className="px-3 py-2.5 text-left font-medium">来源类型</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {memoryDetail.sources.map((s: any, i: number) => (
+                              <tr key={i} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
+                                <td className="px-3 py-2.5 font-mono text-xs" style={{ color: primaryColor }}>{s.chunk_id || '-'}</td>
+                                <td className="px-3 py-2.5" style={{ color: 'var(--color-text-2)' }}>
+                                  {s.source_type === 'chunk' ? '对话分段' : s.source_type === 'message' ? '消息' : s.source_type === 'attachment' ? '附件' : s.source_type === 'web_retrieval' ? '网页检索' : s.source_type}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-sm py-4 text-center" style={{ color: 'var(--color-text-3)' }}>暂无来源信息</div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm py-8 text-center" style={{ color: 'var(--color-text-3)' }}>加载失败</div>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end shrink-0" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => { setViewingMemoryId(null); setMemoryDetail(null); }}
+                className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 删除记忆确认弹窗 */}
+      {confirmDeleteMemoryId && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="rounded-2xl shadow-xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+            <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>删除记忆</h3>
+              <button onClick={() => setConfirmDeleteMemoryId(null)} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-5">
+              <p className="text-sm" style={{ color: 'var(--color-text-2)' }}>确认删除这条记忆？此操作不可撤销。</p>
+            </div>
+            <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button onClick={() => setConfirmDeleteMemoryId(null)} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+              <button onClick={() => handleDeleteMemory(confirmDeleteMemoryId)}
+                className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+                style={{ backgroundColor: '#ef4444' }}>确认删除</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 添加/编辑个人信息弹窗 */}
+      {(showAddProfile || editingProfile) && (
+        <ProfileEditModal
+          initialKey={editingProfile?.key || ''}
+          initialValue={editingProfile?.value || ''}
+          isEdit={!!editingProfile}
+          onClose={() => { setShowAddProfile(false); setEditingProfile(null); }}
+          onSave={(key, value) => {
+            if (editingProfile) {
+              handleUpdateProfile(key, value);
+            } else {
+              handleAddProfile(key, value);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1829,6 +2156,69 @@ function SearchTestPanel({ kbId }: { kbId: string }) {
         {!searching && results === null && (
           <div className="text-sm py-8 text-center" style={{ color: 'var(--color-text-3)' }}>输入查询关键词进行检索测试</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ===== 个人信息编辑弹窗 =====
+function ProfileEditModal({ initialKey, initialValue, isEdit, onClose, onSave }: {
+  initialKey: string;
+  initialValue: string;
+  isEdit: boolean;
+  onClose: () => void;
+  onSave: (key: string, value: string) => void;
+}) {
+  const [key, setKey] = useState(initialKey);
+  const [value, setValue] = useState(initialValue);
+  const [error, setError] = useState('');
+
+  const handleSave = () => {
+    if (!key.trim()) { setError('键不能为空'); return; }
+    if (!value.trim()) { setError('值不能为空'); return; }
+    onSave(key.trim(), value.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+      <div className="rounded-2xl shadow-xl w-full max-w-md overflow-hidden" style={{ backgroundColor: 'var(--color-background)' }}>
+        <div className="px-5 py-4 border-b flex justify-between items-center" style={{ borderColor: 'var(--color-border)' }}>
+          <h3 className="text-lg font-bold" style={{ color: 'var(--color-text)' }}>{isEdit ? '编辑信息' : '添加信息'}</h3>
+          <button onClick={onClose} style={{ color: 'var(--color-text-3)' }}><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>键（字段名）</label>
+            <input
+              value={key}
+              onChange={e => { setKey(e.target.value); setError(''); }}
+              disabled={isEdit}
+              autoFocus={!isEdit}
+              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              placeholder="例如: 昵称、位置、职业、技术栈"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--color-text-2)' }}>值</label>
+            <textarea
+              value={value}
+              onChange={e => { setValue(e.target.value); setError(''); }}
+              autoFocus={isEdit}
+              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none resize-none"
+              style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)', color: 'var(--color-text)', minHeight: '80px' }}
+              placeholder="例如: 张三 (填写详细信息)"
+            />
+          </div>
+          {error && <p className="text-xs" style={{ color: '#ef4444' }}>{error}</p>}
+        </div>
+        <div className="px-5 py-4 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm border transition-colors"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}>取消</button>
+          <button onClick={handleSave}
+            className="px-4 py-2 rounded-lg text-sm text-white font-medium transition-colors hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}>保存</button>
+        </div>
       </div>
     </div>
   );

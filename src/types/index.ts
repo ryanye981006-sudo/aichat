@@ -42,6 +42,7 @@ export interface Conversation {
   id: string;
   assistant_id: string;
   title: string;
+  privacy_mode: number;
   created_at: string;
   updated_at: string;
 }
@@ -61,11 +62,15 @@ export interface Message {
   content: string;
   raw_content: string;
   thought_process: string | null;
+  turn_index: number;
+  memory_enabled: number;
+  privacy_mode: number;
   model_name?: string | null;
   provider_name?: string | null;
   metrics?: MessageMetrics | null;
   citations?: any[] | null;
   aborted?: boolean;
+  toolCalls?: ToolCallEntry[];
   created_at: string;
   isStreaming?: boolean;
 }
@@ -118,8 +123,14 @@ export interface KnowledgeDocument {
 export interface MemoryEntry {
   id: string;
   content: string;
-  hash: string;
-  is_deleted: number;
+  topic: string | null;
+  type: string;
+  importance: number;
+  status: 'active' | 'invalidated';
+  access_count: number;
+  last_accessed: string | null;
+  hash?: string;
+  is_deleted?: number;
   created_at: string;
   updated_at: string;
 }
@@ -142,4 +153,45 @@ export interface ChatFileUploadResult {
   extractedText: string;
   isScannedPdf: boolean;
   images?: { mimeType: string; dataUrl: string }[];
+}
+
+// 记忆长期模块新增类型
+
+export interface ToolCallEntry {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  status: 'pending' | 'running' | 'done' | 'error';
+}
+
+export interface MemoryDetail {
+  id: string;
+  content: string;
+  topic: string | null;
+  type: string;
+  importance: number;
+  status: 'active' | 'invalidated';
+  source_conversation_id: string | null;
+  metadata: Record<string, unknown> | null;
+  access_count: number;
+  last_accessed: string | null;
+  valid_from: string;
+  valid_until: string | null;
+  superseded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  sources?: MemorySource[];
+}
+
+export interface MemorySource {
+  source_id: string;
+  source_type: 'chunk' | 'message' | 'attachment' | 'web_retrieval';
+  chunk_id: string;
+  conversation_id?: string;
+  turn_range?: [number, number];
+}
+
+export interface UserProfile {
+  [key: string]: string;
 }

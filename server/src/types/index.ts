@@ -40,6 +40,7 @@ export interface Conversation {
   id: string;
   assistant_id: string;
   title: string;
+  privacy_mode: number;
   created_at: string;
   updated_at: string;
 }
@@ -51,6 +52,9 @@ export interface Message {
   content: string;
   raw_content: string;
   thought_process: string | null;
+  turn_index: number;
+  memory_enabled: number;
+  privacy_mode: number;
   created_at: string;
 }
 
@@ -70,7 +74,18 @@ export interface Memory {
   content: string;
   hash: string;
   embedding: string;
+  source_conversation_id: string | null;
+  type: string;
+  topic: string | null;
+  importance: number;
+  metadata: string | null;
+  status: 'active' | 'invalidated';
+  superseded_by: string | null;
+  valid_from: string;
+  valid_until: string | null;
   is_deleted: number;
+  access_count: number;
+  last_accessed: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -114,4 +129,88 @@ export interface ChatCompletionRequest {
   conversation_id?: string;
   assistant_id: string;
   message: string;
+}
+
+// 记忆长期模块新增类型
+
+export interface ConversationChunk {
+  id: string;
+  conversation_id: string;
+  start_turn_index: number;
+  end_turn_index: number;
+  content: string;
+  embedding: string;
+  status: 'open' | 'closed' | 'extracting' | 'extracted';
+  closed_at: string | null;
+  extracted_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChunkMessage {
+  id: string;
+  chunk_id: string;
+  message_id: string;
+  turn_index: number;
+  role: string;
+  created_at: string;
+}
+
+export interface MessageAttachment {
+  id: string;
+  message_id: string;
+  type: 'image' | 'file' | 'audio' | 'video';
+  name: string;
+  path: string;
+  created_at: string;
+}
+
+export interface MessageWebRetrieval {
+  id: string;
+  message_id: string;
+  url: string;
+  title: string | null;
+  snippet: string | null;
+  created_at: string;
+}
+
+export interface MemorySourceLink {
+  id: string;
+  memory_id: string;
+  chunk_id: string;
+  source_type: 'chunk' | 'message' | 'attachment' | 'web_retrieval';
+  source_id: string | null;
+  relevance_score: number | null;
+  created_at: string;
+}
+
+export interface UserProfileEntry {
+  key: string;
+  value: string;
+  updated_at: string;
+}
+
+export interface FactExtraction {
+  fact: string;
+  topic?: string;
+  action: 'ADD' | 'UPDATE' | 'DELETE';
+  existing_id: string | null;
+}
+
+export interface MemorySearchResult {
+  memory_id: string;
+  content: string;
+  topic: string | null;
+  type: string;
+  created_at: string;
+  importance: number;
+  source_count: number;
+}
+
+export interface ToolCallEntry {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  status: 'pending' | 'running' | 'done' | 'error';
 }

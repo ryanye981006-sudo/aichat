@@ -1,6 +1,6 @@
 import type { Assistant, Conversation } from '../types';
 import { cn } from '../lib/utils';
-import { Plus, MoreHorizontal, MessageSquare, Settings, Database, Brain, Pencil, Trash2 } from 'lucide-react';
+import { Plus, MoreHorizontal, MessageSquare, Settings, Database, Brain, Pencil, Trash2, User } from 'lucide-react';
 import EmojiIcon from './shared/EmojiIcon';
 import { useState, useEffect, useRef } from 'react';
 
@@ -18,8 +18,8 @@ interface SidebarProps {
   onRemoveConversation: (id: string) => void;
   isSettingsMode: boolean;
   onToggleSettings: (enabled: boolean) => void;
-  settingsTab: 'model' | 'rag' | 'memory';
-  onSettingsTabChange: (tab: 'model' | 'rag' | 'memory') => void;
+  settingsTab: 'model' | 'rag' | 'memory' | 'profile';
+  onSettingsTabChange: (tab: 'model' | 'rag' | 'memory' | 'profile') => void;
   sidebarTab: 'assistants' | 'topics';
   onSidebarTabChange: (tab: 'assistants' | 'topics') => void;
 }
@@ -241,6 +241,7 @@ export default function Sidebar({
               { key: 'model' as const, icon: Settings, label: '模型设置' },
               { key: 'rag' as const, icon: Database, label: 'RAG 知识库' },
               { key: 'memory' as const, icon: Brain, label: '全局记忆' },
+              { key: 'profile' as const, icon: User, label: '个人信息' },
             ]).map(item => (
               <button
                 key={item.key}

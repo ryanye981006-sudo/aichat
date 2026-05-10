@@ -19,7 +19,7 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [isSettingsMode, setIsSettingsMode] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory'>('model');
+  const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory' | 'profile'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [citationsByConv, setCitationsByConv] = useState<Record<string, any[]>>({});
@@ -312,6 +312,9 @@ export default function App() {
       content,
       raw_content: content,
       thought_process: null,
+      turn_index: 0,
+      memory_enabled: 0,
+      privacy_mode: 0,
       created_at: new Date().toISOString(),
     };
 
@@ -322,6 +325,9 @@ export default function App() {
       content: '',
       raw_content: '',
       thought_process: null,
+      turn_index: 0,
+      memory_enabled: 0,
+      privacy_mode: 0,
       created_at: new Date().toISOString(),
       isStreaming: true,
     };
@@ -332,7 +338,7 @@ export default function App() {
 
     const hasMessages = messages.length > 0;
     if (!hasMessages) {
-      conversationsApi.update(activeConvId!, content.slice(0, 30)).then(c => {
+      conversationsApi.update(activeConvId!, { title: content.slice(0, 30) }).then(c => {
         setConversations(prev => prev.map(x => x.id === c.id ? c : x));
       }).catch(() => {});
     }
@@ -431,6 +437,37 @@ export default function App() {
           if (cached) {
             messagesCacheRef.current[activeConvId] = finalizeMessage(cached);
           }
+        }
+      },
+      onToolCall(toolCallId, toolName, args) {
+        // 追加工具调用记录到 AI 消息
+        const tcEntry = { toolCallId, toolName, args, status: 'running' as const };
+        const updateTc = (prev: Message[]) => prev.map(m =>
+          m.id === aiMsg.id
+            ? { ...m, toolCalls: [...(m.toolCalls || []), tcEntry] }
+            : m
+        );
+        if (activeConvId === currentConversationIdRef.current) {
+          setMessages(updateTc);
+        } else {
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) messagesCacheRef.current[activeConvId] = updateTc(cached);
+        }
+      },
+      onToolResult(toolCallId, toolName, result) {
+        // 更新对应工具调用状态为完成
+        const updateTr = (prev: Message[]) => prev.map(m =>
+          m.id === aiMsg.id
+            ? { ...m, toolCalls: (m.toolCalls || []).map(tc =>
+                tc.toolCallId === toolCallId ? { ...tc, result, status: 'done' as const } : tc
+              )}
+            : m
+        );
+        if (activeConvId === currentConversationIdRef.current) {
+          setMessages(updateTr);
+        } else {
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) messagesCacheRef.current[activeConvId] = updateTr(cached);
         }
       },
       onError(error) {
@@ -614,6 +651,35 @@ export default function App() {
           }
         }
       },
+      onToolCall(toolCallId, toolName, args) {
+        const tcEntry = { toolCallId, toolName, args, status: 'running' as const };
+        const updateTc = (prev: Message[]) => prev.map(m =>
+          m.id === effectiveMessageId
+            ? { ...m, toolCalls: [...(m.toolCalls || []), tcEntry] }
+            : m
+        );
+        if (activeConvId === currentConversationIdRef.current) {
+          setMessages(updateTc);
+        } else {
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) messagesCacheRef.current[activeConvId] = updateTc(cached);
+        }
+      },
+      onToolResult(toolCallId, toolName, result) {
+        const updateTr = (prev: Message[]) => prev.map(m =>
+          m.id === effectiveMessageId
+            ? { ...m, toolCalls: (m.toolCalls || []).map(tc =>
+                tc.toolCallId === toolCallId ? { ...tc, result, status: 'done' as const } : tc
+              )}
+            : m
+        );
+        if (activeConvId === currentConversationIdRef.current) {
+          setMessages(updateTr);
+        } else {
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) messagesCacheRef.current[activeConvId] = updateTr(cached);
+        }
+      },
       onError(error) {
         setKbSearchStatus(null);
 
@@ -714,6 +780,16 @@ export default function App() {
             citations={citations}
             kbSearchStatus={kbSearchStatus}
             assistantKbCacheRef={assistantKbCacheRef}
+            conversationId={currentConversationId}
+            conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
+            onTogglePrivacyMode={() => {
+              if (!currentConversationId) return;
+              const current = conversations.find(c => c.id === currentConversationId);
+              const newMode = current?.privacy_mode ? 0 : 1;
+              conversationsApi.update(currentConversationId, { privacy_mode: newMode }).then(c => {
+                setConversations(prev => prev.map(x => x.id === c.id ? c : x));
+              }).catch(() => {});
+            }}
           />
         )}
       </div>

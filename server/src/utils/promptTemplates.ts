@@ -7,12 +7,15 @@ export const MEMORY_EXTRACT_PROMPT = `你是一个记忆提取助手。分析以
 - UPDATE: 已有记忆需要更新（提供 existing_id）
 - DELETE: 过时或不正确的记忆需要删除（提供 existing_id）
 
+为每条记忆提供 topic 字段，用于分类（如"个人信息"、"技术偏好"、"项目背景"、"日程计划"等）。
+
 返回 JSON 数组格式：
 [
   {
     "fact": "用户名为张三，是一名前端开发工程师",
-    "action": "ADD|UPDATE|DELETE",
-    "existing_id": null  // UPDATE/DELETE 时需要提供记忆 ID
+    "topic": "个人信息",
+    "action": "ADD",
+    "existing_id": null
   }
 ]
 

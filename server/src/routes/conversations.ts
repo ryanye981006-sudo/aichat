@@ -49,11 +49,16 @@ router.patch('/:id', (req, res) => {
     return res.status(404).json({ error: '对话不存在' });
   }
 
-  const { title } = req.body;
-  if (title) {
+  const { title, privacy_mode } = req.body;
+  if (title !== undefined) {
     db.prepare(
       "UPDATE conversations SET title = ?, updated_at = datetime('now') WHERE id = ?"
     ).run(title, req.params.id);
+  }
+  if (privacy_mode !== undefined) {
+    db.prepare(
+      "UPDATE conversations SET privacy_mode = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(privacy_mode ? 1 : 0, req.params.id);
   }
 
   const conversation = db.prepare('SELECT * FROM conversations WHERE id = ?').get(req.params.id);

@@ -4,7 +4,7 @@ import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
 import { getFileCategory, checkFileAllowed, getSupportedExts } from '../lib/modelCapabilities';
 import { knowledgeApi } from '../services/api';
-import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle, X } from 'lucide-react';
+import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle, X, Shield } from 'lucide-react';
 import { Tooltip, message as antMessage } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
@@ -25,6 +25,9 @@ interface ChatAreaProps {
   citations?: any[];
   kbSearchStatus?: string | null;
   assistantKbCacheRef: React.MutableRefObject<Record<string, string[]>>;
+  conversationId?: string | null;
+  conversationPrivacyMode?: number;
+  onTogglePrivacyMode?: () => void;
 }
 
 /** 格式化时间: YYYY-MM-DD HH:mm:ss */
@@ -46,6 +49,7 @@ function formatTime(iso: string): string {
 export default function ChatArea({
   assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
   providers, models, onRegenerate, citations = [], kbSearchStatus, assistantKbCacheRef,
+  conversationId, conversationPrivacyMode, onTogglePrivacyMode,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -269,10 +273,11 @@ export default function ChatArea({
     onThinkingModeChange?.(mode);
   };
 
-  // 计算当前使用的上下文轮数
+  // 计算当前实际发送给 LLM 的上下文轮数（后端会按 context_rounds 截断）
   const nonSystemMessages = messages.filter(m => m.role !== 'system');
-  const usedRounds = Math.ceil(nonSystemMessages.filter(m => m.role === 'user').length) + (input.trim() && !isStreaming ? 1 : 0);
+  const totalRounds = Math.ceil(nonSystemMessages.filter(m => m.role === 'user').length) + (input.trim() && !isStreaming ? 1 : 0);
   const maxRounds = assistant?.context_rounds || 10;
+  const usedRounds = Math.min(totalRounds, maxRounds);
 
   // 复制消息内容
   const handleCopy = useCallback(async (content: string, messageId: string) => {
@@ -316,6 +321,23 @@ export default function ChatArea({
           <EmojiIcon emoji={assistant.emoji || '🤖'} size={24} fontSize={13} />
           <span className="font-semibold text-sm">{assistant.name}</span>
         </button>
+        <div className="flex-1" />
+        {conversationId && onTogglePrivacyMode && (
+          <button
+            onClick={onTogglePrivacyMode}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors border",
+              conversationPrivacyMode ? "bg-red-50 border-red-200" : "border-gray-200"
+            )}
+            style={{
+              color: conversationPrivacyMode ? '#dc2626' : 'var(--color-text-2)',
+            }}
+            title={conversationPrivacyMode ? '隐私模式已开启，当前对话不会被提取为记忆' : '隐私模式已关闭'}
+          >
+            <Shield className="w-3 h-3" />
+            {conversationPrivacyMode ? '隐私中' : '隐私'}
+          </button>
+        )}
       </div>
 
       {/* Messages */}
@@ -363,6 +385,34 @@ export default function ChatArea({
 
                   {message.thought_process && (
                     <ThinkBlock content={message.thought_process} />
+                  )}
+                  {/* 工具调用块 */}
+                  {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+                    <div className="flex flex-col gap-1 w-full">
+                      {message.toolCalls.map(tc => (
+                        <div key={tc.toolCallId} className="text-xs px-3 py-2 rounded-lg border" style={{
+                          backgroundColor: 'var(--color-background-soft)',
+                          borderColor: 'var(--color-border-soft)',
+                          color: 'var(--color-text-2)',
+                        }}>
+                          <div className="flex items-center gap-1.5">
+                            <BrainCircuit className="w-3 h-3" style={{ color: 'var(--color-primary)' }} />
+                            <span className="font-medium">{tc.toolName}</span>
+                            {tc.status === 'running' && (
+                              <span className="animate-pulse" style={{ color: 'var(--color-primary)' }}>执行中...</span>
+                            )}
+                            {tc.status === 'done' && <Check className="w-3 h-3" style={{ color: '#12C175' }} />}
+                          </div>
+                          {tc.status === 'done' && tc.result && (
+                            <div className="mt-1 opacity-70">
+                              {typeof tc.result === 'string'
+                                ? tc.result.slice(0, 200)
+                                : JSON.stringify(tc.result).slice(0, 200)}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
                   {/* 消息气泡 */}
                   {message.content ? (

@@ -5,8 +5,13 @@ import { aiSdkService as aiService } from '../services/AiSdkService.js';
 import { memoryService } from '../services/MemoryService.js';
 import { knowledgeService } from '../services/KnowledgeService.js';
 import { loaderService } from '../services/LoaderService.js';
+import { userProfileService } from '../services/UserProfileService.js';
+import { conversationChunkService } from '../services/ConversationChunkService.js';
+import { toolDefinitionBuilder } from '../services/ToolDefinitionBuilder.js';
+import { toolExecutor } from '../services/ToolExecutor.js';
 import { upload } from '../services/FileStorage.js';
 import { cleanText } from '../utils/cleanText.js';
+
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
 
@@ -57,11 +62,18 @@ router.post('/completions', async (req: Request, res: Response) => {
     ).run(activeConvId, assistant_id, message.slice(0, 30));
   }
 
-  // 保存用户消息
+  // 获取对话隐私模式快照
+  const conv = db.prepare('SELECT privacy_mode FROM conversations WHERE id = ?').get(activeConvId) as any;
+  const convPrivacyMode = conv?.privacy_mode || 0;
+
+  // 分配 turn_index
+  const turnIndex = conversationChunkService.assignTurnIndex(activeConvId);
+
+  // 保存用户消息（含消息快照字段）
   const userMsgId = uuidv4();
   db.prepare(
-    'INSERT INTO messages (id, conversation_id, role, content, raw_content, model_name, provider_name) VALUES (?, ?, ?, ?, ?, ?, ?)'
-  ).run(userMsgId, activeConvId, 'user', message, message, modelName || null, providerName || null);
+    'INSERT INTO messages (id, conversation_id, role, content, raw_content, model_name, provider_name, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(userMsgId, activeConvId, 'user', message, message, modelName || null, providerName || null, turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode);
 
   // 更新对话时间
   db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
@@ -83,13 +95,8 @@ router.post('/completions', async (req: Request, res: Response) => {
   // 构建系统提示词（整合记忆 + 知识库）
   let systemContent = assistant.system_prompt || '';
 
-  // 注入记忆
-  if (assistant.enable_memory) {
-    const memories = await memoryService.getMemoriesForChat();
-    if (memories) {
-      systemContent += `\n\n## 关于用户的长期记忆\n${memories}`;
-    }
-  }
+  // 注入用户个人信息（固定拼接，不走检索）
+  systemContent += userProfileService.buildProfileSection();
 
   // 注入知识库：前端显式传递时以前端为准（含空数组），否则使用助手配置
   let kbIds: string[] = [];
@@ -200,11 +207,24 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
   }
 
+  // 构建记忆工具（含 execute 包装）
+  const toolSchemas = toolDefinitionBuilder.buildTools(!!assistant.enable_memory);
+  let tools: Record<string, any> | undefined;
+  if (toolSchemas) {
+    tools = {};
+    for (const [name, def] of Object.entries(toolSchemas)) {
+      tools[name] = {
+        ...def,
+        execute: async (args: any) => toolExecutor.execute(name, args),
+      };
+    }
+  }
+
   let fullRawContent = '';
   const tLlmStart = Date.now();
   let firstTokenLogged = false;
 
-  // 调用 LLM 流式（传入 abortSignal 以支持中止）
+  // 调用 LLM 流式（传入 abortSignal 以支持中止，传入 tools 支持记忆检索）
   await aiService.chatStream(
     chatMessages,
     assistant.model_id,
@@ -250,10 +270,10 @@ router.post('/completions', async (req: Request, res: Response) => {
           }
         }
 
-        // 保存助手消息到 DB（含性能指标）
+        // 保存助手消息到 DB（含性能指标 + 快照字段）
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, activeConvId, 'assistant', parsedContent, fullText, thoughtProcess,
           modelName, providerName || null,
@@ -262,6 +282,7 @@ router.post('/completions', async (req: Request, res: Response) => {
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
+          turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode,
         );
 
         // 更新对话时间
@@ -281,25 +302,40 @@ router.post('/completions', async (req: Request, res: Response) => {
 
         endResponse();
 
-        // 异步处理记忆提取
-        if (assistant.enable_memory) {
-          const recentMessages = db.prepare(
-            'SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?'
-          ).all(activeConvId, 20) as any[];
-
-          memoryService.extractFacts(recentMessages.reverse())
-            .then(facts => memoryService.processFacts(facts))
-            .catch(err => console.error('[Chat] 异步记忆处理失败:', err));
+        // 异步: 超出 L0（助手配置的 context_rounds）后进入 chunk 关联 + 边界检测
+        if (turnIndex > rounds) {
+          const chunk = conversationChunkService.getOpenChunk(activeConvId);
+          if (chunk) {
+            // 将用户消息和助手消息关联到 chunk
+            conversationChunkService.addTurnToChunk(chunk.id, userMsgId, turnIndex, 'user', message);
+            conversationChunkService.addTurnToChunk(chunk.id, aiMsgId, turnIndex, 'assistant', parsedContent);
+          }
+          // 检查 chunk 边界（内部会创建 chunk 如果尚不存在）
+          conversationChunkService.checkChunkBoundaryAsync(activeConvId)
+            .then(result => {
+              if (result.closed) {
+                console.log(`[Chat] Chunk 闭合触发 | conv=${activeConvId} | chunkId=${result.chunkId}`);
+              }
+            })
+            .catch(err => console.error('[Chat] Chunk 边界检测失败:', err));
         }
       },
       onError(error: Error) {
         sendSSE({ type: 'error', message: error.message });
         endResponse();
       },
+      onToolCall(toolCallId: string, toolName: string, args: any) {
+        sendSSE({ type: 'tool_call', toolCallId, toolName, args });
+      },
+      onToolResult(toolCallId: string, toolName: string, result: any) {
+        sendSSE({ type: 'tool_result', toolCallId, toolName, result });
+      },
     },
     abortController.signal,
     thinkingMode,
     requestStartTime,
+    tools,
+    3, // maxSteps：最多 3 轮工具调用
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -314,8 +350,8 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -373,14 +409,9 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     return;
   }
 
-  // 构建系统提示词
+  // 构建系统提示词（注入用户个人信息，记忆改为工具检索）
   let systemContent = assistant.system_prompt || '';
-  if (assistant.enable_memory) {
-    const memories = await memoryService.getMemoriesForChat();
-    if (memories) {
-      systemContent += `\n\n## 关于用户的长期记忆\n${memories}`;
-    }
-  }
+  systemContent += userProfileService.buildProfileSection();
   let kbIds: string[] = [];
   if (Array.isArray(kb_ids)) {
     kbIds = kb_ids;
@@ -492,6 +523,24 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
   }
 
+  // 获取原始消息的 turn_index 和快照（重新生成时复用）
+  const regenTurnIndex = targetMsg.turn_index || lastUserMsg.turn_index || 0;
+  const regenMemoryEnabled = lastUserMsg.memory_enabled ?? (assistant.enable_memory ? 1 : 0);
+  const regenPrivacyMode = lastUserMsg.privacy_mode ?? 0;
+
+  // 构建记忆工具
+  const regenToolSchemas = toolDefinitionBuilder.buildTools(!!assistant.enable_memory);
+  let regenTools: Record<string, any> | undefined;
+  if (regenToolSchemas) {
+    regenTools = {};
+    for (const [name, def] of Object.entries(regenToolSchemas)) {
+      regenTools[name] = {
+        ...def,
+        execute: async (args: any) => toolExecutor.execute(name, args),
+      };
+    }
+  }
+
   let fullRawContent = '';
   const tLlmStart = Date.now();
   let firstTokenLogged = false;
@@ -534,7 +583,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, conversation_id, 'assistant', parsedContent, fullText, thoughtProcess,
           modelName, providerName || null,
@@ -543,6 +592,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
+          regenTurnIndex, regenMemoryEnabled, regenPrivacyMode,
         );
 
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
@@ -559,28 +609,27 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         });
 
         endResponse();
-
-        if (assistant.enable_memory) {
-          const recentMessages = db.prepare(
-            'SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT ?'
-          ).all(conversation_id, 20) as any[];
-          memoryService.extractFacts(recentMessages.reverse())
-            .then(facts => memoryService.processFacts(facts))
-            .catch(err => console.error('[Chat] 异步记忆处理失败:', err));
-        }
       },
       onError(error: Error) {
-        // 回滚：恢复被删除的消息，避免数据丢失
+        // 回滚：恢复被删除的消息，避免数据丢失（保留原始快照字段）
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process, targetMsg.model_name || modelName, targetMsg.provider_name || providerName || null, targetMsg.citations || null);
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(message_id, conversation_id, 'assistant', targetMsg.content, targetMsg.raw_content, targetMsg.thought_process, targetMsg.model_name || modelName, targetMsg.provider_name || providerName || null, targetMsg.citations || null, targetMsg.turn_index || 0, targetMsg.memory_enabled || 0, targetMsg.privacy_mode || 0);
         sendSSE({ type: 'error', message: error.message });
         endResponse();
+      },
+      onToolCall(toolCallId: string, toolName: string, args: any) {
+        sendSSE({ type: 'tool_call', toolCallId, toolName, args });
+      },
+      onToolResult(toolCallId: string, toolName: string, result: any) {
+        sendSSE({ type: 'tool_result', toolCallId, toolName, result });
       },
     },
     abortController.signal,
     regenThinkingMode,
     requestStartTime,
+    regenTools,
+    3,
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -595,8 +644,8 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }

@@ -1,6 +1,6 @@
 // 多提供商 LLM 抽象：使用 Vercel AI SDK (OpenAI 兼容协议) 调用各厂商 API
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { streamText as _streamText, generateText as _generateText } from 'ai'
+import { streamText as _streamText, generateText as _generateText, stepCountIs } from 'ai'
 import { getDb } from '../db/connection.js'
 
 // 缓存 provider SDK 实例，避免每次请求重新创建连接
@@ -27,6 +27,8 @@ export interface StreamCallbacks {
   onReasoning: (token: string) => void
   onComplete: (fullText: string, metrics?: StreamMetrics, reasoningText?: string) => void
   onError: (error: Error) => void
+  onToolCall?: (toolCallId: string, toolName: string, args: any) => void
+  onToolResult?: (toolCallId: string, toolName: string, result: any) => void
 }
 
 export interface StreamMetrics {
@@ -95,6 +97,8 @@ export class AiSdkService {
     abortSignal?: AbortSignal,
     thinkingMode?: string,
     requestStartTime?: number,  // RAG 场景下从请求入口传入，确保 TTFT 包含检索耗时
+    tools?: Record<string, any>,     // AI SDK tools 定义（含 execute）
+    maxSteps?: number,               // 工具调用最大轮次
   ): Promise<void> {
     const db = getDb()
     const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(providerId) as any
@@ -150,10 +154,12 @@ export class AiSdkService {
         messages,
         temperature,
         abortSignal,
+        ...(tools ? { tools, stopWhen: stepCountIs((maxSteps ?? 3) + 1) } : {}),
         ...(Object.keys(providerOptions).length > 0 ? { providerOptions } : {}),
       })
       // 使用 fullStream 消费 —— 既可获取文本也能从 finish 事件获取 usage
       let reasoningText = ''
+      const toolArgsAccumulator = new Map<string, string>()
       for await (const part of streamResult.fullStream) {
         if (abortSignal?.aborted) break
 
@@ -175,9 +181,48 @@ export class AiSdkService {
             callbacks.onReasoning(part.text)
             break
           }
+          case 'tool-input-start': {
+            toolArgsAccumulator.clear()
+            break
+          }
+          case 'tool-input-delta': {
+            const current = [...toolArgsAccumulator.values()][0] || ''
+            const delta = (part as any).delta || ''
+            toolArgsAccumulator.clear()
+            toolArgsAccumulator.set('current', current + delta)
+            break
+          }
+          case 'tool-input-end': {
+            break
+          }
+          case 'tool-call': {
+            const p = part as any
+            const toolCallId = p.toolCallId
+            let args: any
+            const accumulated = toolArgsAccumulator.get('current')
+            if (accumulated) {
+              try { args = JSON.parse(accumulated); } catch { args = accumulated; }
+            } else if (p.input && typeof p.input === 'object' && Object.keys(p.input).length > 0) {
+              args = p.input
+            } else if (p.input && typeof p.input === 'string' && p.input !== '{}') {
+              try { args = JSON.parse(p.input); } catch { args = {}; }
+            } else {
+              args = {}
+            }
+            toolArgsAccumulator.clear()
+            callbacks.onToolCall?.(toolCallId, part.toolName, args)
+            break
+          }
+          case 'tool-result': {
+            callbacks.onToolResult?.(part.toolCallId, part.toolName, part.result)
+            break
+          }
           case 'error': {
             callbacks.onError(new Error(String(part.error)))
             return
+          }
+          default: {
+            // start, start-step, reasoning-start, reasoning-end, text-start, text-end, finish-step, finish 等事件无需处理
           }
         }
       }

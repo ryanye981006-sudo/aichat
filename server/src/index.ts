@@ -12,6 +12,8 @@ import providersRouter from './routes/providers.js';
 import modelsRouter from './routes/models.js';
 import memoryRouter from './routes/memory.js';
 import knowledgeRouter from './routes/knowledge.js';
+import profileRouter from './routes/profile.js';
+import { conversationIdleDetector } from './services/ConversationIdleDetector.js';
 
 const app = express();
 
@@ -22,6 +24,9 @@ app.use(express.json({ limit: '10mb' }));
 // 初始化数据库连接
 getDb();
 
+// 启动空闲会话检测器（触发 B：会话空闲超时→强制提取记忆）
+conversationIdleDetector.start();
+
 // API 路由
 app.use('/api/assistants', assistantsRouter);
 app.use('/api/conversations', conversationsRouter);
@@ -31,6 +36,7 @@ app.use('/api/providers', providersRouter);
 app.use('/api/models', modelsRouter);
 app.use('/api/memory', memoryRouter);
 app.use('/api/knowledge', knowledgeRouter);
+app.use('/api/profile', profileRouter);
 
 // 健康检查
 app.get('/api/health', (_req, res) => {
