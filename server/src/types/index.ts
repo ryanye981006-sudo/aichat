@@ -30,6 +30,7 @@ export interface Assistant {
   temperature_enabled: number;
   context_rounds: number;
   enable_memory: number;
+  enable_web_search: number;
   knowledge_base_ids: string;
   thinking_mode: string;
   created_at: string;
@@ -214,4 +215,32 @@ export interface ToolCallEntry {
   args: Record<string, unknown>;
   result?: unknown;
   status: 'pending' | 'running' | 'done' | 'error';
+  started_at?: string;
+  completed_at?: string;
 }
+
+// 网页搜索相关类型
+export interface SearchParams {
+  query: string;
+  maxResults?: number;
+  timeRange?: 'NoLimit' | 'OneDay' | 'OneWeek' | 'OneMonth' | 'OneYear';
+}
+
+export interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  summary?: string;
+  publishedTime?: string;
+  rerankScore?: number;
+  hostname?: string;
+  hostLogo?: string;
+}
+
+export interface PageContent {
+  url: string;
+  title: string;
+  content: string;
+  fetchedAt: string;
+}
+

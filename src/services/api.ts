@@ -102,6 +102,12 @@ export const knowledgeApi = {
 };
 
 // ===== 聊天文件上传 API =====
+// ===== 全局设置 API =====
+export const settingsApi = {
+  getIqsKey: () => request<{ configured: boolean; masked: string }>('/settings/iqs-key'),
+  updateIqsKey: (apiKey: string) => request<{ success: boolean; configured: boolean }>('/settings/iqs-key', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+};
+
 export const chatFileApi = {
   upload: (file: File, isVisionModel: boolean) => {
     const formData = new FormData();
@@ -301,6 +307,12 @@ export function regenerateSSE(
               break;
             case 'error':
               callbacks.onError(data.message);
+              break;
+            case 'tool_call':
+              callbacks.onToolCall?.(data.toolCallId, data.toolName, data.args);
+              break;
+            case 'tool_result':
+              callbacks.onToolResult?.(data.toolCallId, data.toolName, data.result);
               break;
 			  }
         } catch { /* 忽略解析错误 */ }

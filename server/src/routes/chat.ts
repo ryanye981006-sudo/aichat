@@ -9,6 +9,7 @@ import { userProfileService } from '../services/UserProfileService.js';
 import { conversationChunkService } from '../services/ConversationChunkService.js';
 import { toolDefinitionBuilder } from '../services/ToolDefinitionBuilder.js';
 import { toolExecutor } from '../services/ToolExecutor.js';
+import { webSearchService } from '../services/WebSearchService.js';
 import { upload } from '../services/FileStorage.js';
 import { cleanText } from '../utils/cleanText.js';
 import { config } from '../config.js';
@@ -208,15 +209,35 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
   }
 
-  // 构建记忆工具（含 execute 包装）
-  const toolSchemas = toolDefinitionBuilder.buildTools(!!assistant.enable_memory);
+  // 确定联网搜索开关：助手设置 + 搜索引擎已配置
+  const webSearchEnabled = !!(assistant.enable_web_search && webSearchService.isAvailable());
+
+  // 构建记忆工具（含 execute 包装 + per-tool 调用上限）
+  const toolSchemas = toolDefinitionBuilder.buildTools({
+    memoryEnabled: !!assistant.enable_memory,
+    webSearchEnabled,
+  });
   let tools: Record<string, any> | undefined;
+  const toolCallCounts = new Map<string, number>();
+  const toolCallEntries: any[] = [];
+
+  function wrapWithLimit(toolName: string, execute: (args: any) => Promise<any>) {
+    return async (args: any) => {
+      const count = toolCallCounts.get(toolName) || 0;
+      if (count >= config.maxToolCallPerTool) {
+        return { error: `${toolName} 调用次数已达上限（${config.maxToolCallPerTool}次），请基于现有结果回答` };
+      }
+      toolCallCounts.set(toolName, count + 1);
+      return execute(args);
+    };
+  }
+
   if (toolSchemas) {
     tools = {};
     for (const [name, def] of Object.entries(toolSchemas)) {
       tools[name] = {
         ...def,
-        execute: async (args: any) => toolExecutor.execute(name, args),
+        execute: wrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args)),
       };
     }
   }
@@ -271,10 +292,10 @@ router.post('/completions', async (req: Request, res: Response) => {
           }
         }
 
-        // 保存助手消息到 DB（含性能指标 + 快照字段）
+        // 保存助手消息到 DB（含性能指标 + 快照字段 + 工具调用）
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, activeConvId, 'assistant', parsedContent, fullText, thoughtProcess,
           modelName, providerName || null,
@@ -283,6 +304,7 @@ router.post('/completions', async (req: Request, res: Response) => {
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
+          toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null,
           turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode,
         );
 
@@ -324,9 +346,22 @@ router.post('/completions', async (req: Request, res: Response) => {
         endResponse();
       },
       onToolCall(toolCallId: string, toolName: string, args: any) {
+        toolCallEntries.push({
+          toolCallId,
+          toolName,
+          args,
+          status: 'running',
+          started_at: new Date().toISOString(),
+        });
         sendSSE({ type: 'tool_call', toolCallId, toolName, args });
       },
       onToolResult(toolCallId: string, toolName: string, result: any) {
+        const entry = toolCallEntries.find(e => e.toolCallId === toolCallId);
+        if (entry) {
+          entry.result = result;
+          entry.status = 'done';
+          entry.completed_at = new Date().toISOString();
+        }
         sendSSE({ type: 'tool_result', toolCallId, toolName, result });
       },
     },
@@ -334,7 +369,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     thinkingMode,
     requestStartTime,
     tools,
-    3, // maxSteps：最多 3 轮工具调用
+    config.maxTotalToolRounds, // maxSteps：全局总轮次硬上限
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -349,8 +384,8 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -527,15 +562,35 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   const regenMemoryEnabled = lastUserMsg.memory_enabled ?? (assistant.enable_memory ? 1 : 0);
   const regenPrivacyMode = lastUserMsg.privacy_mode ?? 0;
 
-  // 构建记忆工具
-  const regenToolSchemas = toolDefinitionBuilder.buildTools(!!assistant.enable_memory);
+  // 确定联网搜索开关：助手设置 + 搜索引擎已配置
+  const regenWebSearchEnabled = !!(assistant.enable_web_search && webSearchService.isAvailable());
+
+  // 构建工具（含 per-tool 调用上限）
+  const regenToolSchemas = toolDefinitionBuilder.buildTools({
+    memoryEnabled: !!assistant.enable_memory,
+    webSearchEnabled: regenWebSearchEnabled,
+  });
   let regenTools: Record<string, any> | undefined;
+  const regenToolCallCounts = new Map<string, number>();
+  const regenToolCallEntries: any[] = [];
+
+  function regenWrapWithLimit(toolName: string, execute: (args: any) => Promise<any>) {
+    return async (args: any) => {
+      const count = regenToolCallCounts.get(toolName) || 0;
+      if (count >= config.maxToolCallPerTool) {
+        return { error: `${toolName} 调用次数已达上限（${config.maxToolCallPerTool}次），请基于现有结果回答` };
+      }
+      regenToolCallCounts.set(toolName, count + 1);
+      return execute(args);
+    };
+  }
+
   if (regenToolSchemas) {
     regenTools = {};
     for (const [name, def] of Object.entries(regenToolSchemas)) {
       regenTools[name] = {
         ...def,
-        execute: async (args: any) => toolExecutor.execute(name, args),
+        execute: regenWrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args)),
       };
     }
   }
@@ -582,7 +637,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
         const aiMsgId = uuidv4();
         db.prepare(
-          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+          'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, prompt_tokens, completion_tokens, ttft_ms, tokens_per_second, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(
           aiMsgId, conversation_id, 'assistant', parsedContent, fullText, thoughtProcess,
           modelName, providerName || null,
@@ -591,6 +646,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
+          regenToolCallEntries.length > 0 ? JSON.stringify(regenToolCallEntries) : null,
           regenTurnIndex, regenMemoryEnabled, regenPrivacyMode,
         );
 
@@ -618,9 +674,22 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         endResponse();
       },
       onToolCall(toolCallId: string, toolName: string, args: any) {
+        regenToolCallEntries.push({
+          toolCallId,
+          toolName,
+          args,
+          status: 'running',
+          started_at: new Date().toISOString(),
+        });
         sendSSE({ type: 'tool_call', toolCallId, toolName, args });
       },
       onToolResult(toolCallId: string, toolName: string, result: any) {
+        const entry = regenToolCallEntries.find(e => e.toolCallId === toolCallId);
+        if (entry) {
+          entry.result = result;
+          entry.status = 'done';
+          entry.completed_at = new Date().toISOString();
+        }
         sendSSE({ type: 'tool_result', toolCallId, toolName, result });
       },
     },
@@ -628,7 +697,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     regenThinkingMode,
     requestStartTime,
     regenTools,
-    3,
+    config.maxTotalToolRounds,
   );
 
   // 如果被中止，保存已有内容（即使为空也保存，确保消息持久化）
@@ -643,8 +712,8 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
     const aiMsgId = uuidv4();
     db.prepare(
-      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
+      'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, regenToolCallEntries.length > 0 ? JSON.stringify(regenToolCallEntries) : null, regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }

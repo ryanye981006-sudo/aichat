@@ -14,6 +14,7 @@ function translateError(err: any, defaultMsg: string = '未知错误'): string {
   if (/401|Unauthorized/i.test(msg)) return 'API 密钥无效或未配置'
   if (/403|Forbidden/i.test(msg)) return 'API 访问被拒绝，请检查密钥权限'
   if (/404|not\s*found|does not exist/i.test(msg)) return '模型不存在，请确认模型名称是否正确'
+  if (/function\s*call|tool\s*call|tools|invalid.*tool/i.test(msg)) return '该模型不支持工具调用（记忆搜索/联网搜索），请关闭记忆/联网开关后重发，或切换到 GPT-4o、Claude 等支持 Function Calling 的模型'
   return msg
 }
 

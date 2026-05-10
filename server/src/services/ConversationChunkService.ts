@@ -106,7 +106,7 @@ export class ConversationChunkService {
   }
 
   // 关闭当前 open chunk，异步触发记忆提取
-  closeChunk(conversationId: string): string {
+  closeChunk(conversationId: string, trigger: 'topic_shift' | 'session_idle' = 'topic_shift'): string {
     const db = getDb();
     const chunk = this.getOpenChunk(conversationId);
     if (!chunk) return '';
@@ -133,7 +133,7 @@ export class ConversationChunkService {
     });
 
     // 异步触发记忆提取
-    this.extractFromChunk(chunk.id).catch(err => {
+    this.extractFromChunk(chunk.id, trigger).catch(err => {
       console.error('[ConversationChunk] 记忆提取失败:', err);
     });
 
@@ -210,7 +210,7 @@ export class ConversationChunkService {
   }
 
   // 从 chunk 提取记忆（内部调用 MemoryService）
-  async extractFromChunk(chunkId: string): Promise<void> {
+  async extractFromChunk(chunkId: string, trigger: 'topic_shift' | 'session_idle' = 'topic_shift'): Promise<void> {
     const db = getDb();
 
     // 状态 → extracting（防止并发提取）
@@ -248,17 +248,17 @@ export class ConversationChunkService {
       );
 
       // 按 action 分发
-      const extractionTrigger = 'topic_shift'; // 由 closeChunk 路径触发
+      const extractionTrigger = trigger;
 
       for (const fact of facts) {
         try {
           switch (fact.action) {
             case 'ADD':
-              await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId, undefined, fact.importance);
+              await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId, undefined, fact.importance, trigger);
               break;
             case 'UPDATE':
               if (fact.existing_id) {
-                const newId = await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId, undefined, fact.importance);
+                const newId = await memoryService.addMemoryWithSource(fact.fact, fact.topic || null, chunkId, undefined, fact.importance, trigger);
                 await memoryService.invalidateMemory(fact.existing_id, newId);
               }
               break;
@@ -320,10 +320,10 @@ export class ConversationChunkService {
     for (const chunk of staleChunks) {
       if (chunk.status === 'open') {
         console.log(`[ConversationChunk] 空闲闭合 chunk | id=${chunk.id} | conv=${chunk.conversation_id}`);
-        this.closeChunk(chunk.conversation_id);
+        this.closeChunk(chunk.conversation_id, 'session_idle');
       } else if (chunk.status === 'closed') {
         console.log(`[ConversationChunk] 空闲提取 chunk | id=${chunk.id}`);
-        this.extractFromChunk(chunk.id).catch(err => {
+        this.extractFromChunk(chunk.id, 'session_idle').catch(err => {
           console.error('[ConversationChunk] 空闲提取失败:', err);
         });
       }
@@ -332,7 +332,7 @@ export class ConversationChunkService {
     // 重试 stuck chunk
     for (const chunk of stuckChunks) {
       console.log(`[ConversationChunk] 重试 stuck chunk 提取 | id=${chunk.id}`);
-      this.extractFromChunk(chunk.id).catch(err => {
+      this.extractFromChunk(chunk.id, 'session_idle').catch(err => {
         console.error('[ConversationChunk] stuck chunk 重试失败:', err);
       });
     }

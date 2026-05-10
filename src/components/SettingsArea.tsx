@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model, KnowledgeBase, KnowledgeDocument, MemorySettings, MemoryEntry } from '../types';
 import { cn } from '../lib/utils';
-import { providersApi, modelsApi, knowledgeApi, memoryApi, profileApi } from '../services/api';
-import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil, ExternalLink, User } from 'lucide-react';
+import { providersApi, modelsApi, knowledgeApi, memoryApi, profileApi, settingsApi } from '../services/api';
+import { Search, Plus, Eye, EyeOff, Minus, Settings, Database, Brain, Box, Upload, X, ChevronRight, FileText, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, MoreHorizontal, Pencil, ExternalLink, User, Globe } from 'lucide-react';
 import ModelSelectModal from './shared/ModelSelectModal';
 
 // 分块策略中文名
@@ -116,6 +116,12 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
   const [loadingMemoryDetail, setLoadingMemoryDetail] = useState(false);
   const [confirmDeleteMemoryId, setConfirmDeleteMemoryId] = useState<string | null>(null);
 
+  // ===== IQS Key 状态 =====
+  const [iqsKeyConfigured, setIqsKeyConfigured] = useState(false);
+  const [iqsKeyMasked, setIqsKeyMasked] = useState('');
+  const [iqsKeyInput, setIqsKeyInput] = useState('');
+  const [iqsKeySaving, setIqsKeySaving] = useState(false);
+
   // ===== 个人信息状态 =====
   const [profileEntries, setProfileEntries] = useState<{ key: string; value: string }[]>([]);
   const [editingProfile, setEditingProfile] = useState<{ key: string; value: string } | null>(null);
@@ -127,6 +133,7 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
     loadKnowledgeBases();
     loadMemoryData();
     loadProfileData();
+    loadIqsKeyStatus();
   }, []);
 
   const loadProviders = async () => {
@@ -165,6 +172,29 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
       const entries = await profileApi.list();
       setProfileEntries(entries);
     } catch (e) { console.error('加载个人信息失败:', e); }
+  };
+
+  const loadIqsKeyStatus = async () => {
+    try {
+      const result = await settingsApi.getIqsKey();
+      setIqsKeyConfigured(result.configured);
+      setIqsKeyMasked(result.masked || '');
+    } catch (e) { console.error('加载 IQS Key 状态失败:', e); }
+  };
+
+  const handleSaveIqsKey = async () => {
+    if (!iqsKeyInput.trim()) return;
+    setIqsKeySaving(true);
+    try {
+      const result = await settingsApi.updateIqsKey(iqsKeyInput.trim());
+      setIqsKeyConfigured(result.configured);
+      setIqsKeyInput('');
+      showToast('IQS API Key 已保存');
+    } catch (e: any) {
+      showToast(e.message || '保存失败');
+    } finally {
+      setIqsKeySaving(false);
+    }
   };
 
   const selectedProvider = providers.find(p => p.id === selectedProviderId);
@@ -480,6 +510,50 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
               >
                 <Plus className="w-4 h-4" /> 添加
               </button>
+            </div>
+
+            {/* IQS 联网搜索 Key */}
+            <div className="p-3 border-t" style={{ borderColor }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Globe className="w-3.5 h-3.5" style={{ color: textSecondary }} />
+                <span className="text-xs font-medium" style={{ color: textSecondary }}>IQS 搜索 Key</span>
+                <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", iqsKeyConfigured ? 'text-green-600 bg-green-50' : 'text-yellow-600 bg-yellow-50')}>
+                  {iqsKeyConfigured ? '已配置' : '未配置'}
+                </span>
+              </div>
+              {iqsKeyConfigured ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 px-2 py-1.5 rounded text-xs bg-black/5 truncate" style={{ color: textSecondary, fontSize: '10px' }}>
+                      {iqsKeyMasked}
+                    </code>
+                    <button
+                      onClick={() => { setIqsKeyConfigured(false); setIqsKeyInput(''); }}
+                      className="text-xs transition-colors hover:opacity-70 shrink-0"
+                      style={{ color: '#ef4444' }}>
+                      移除
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    type="password"
+                    value={iqsKeyInput}
+                    onChange={e => setIqsKeyInput(e.target.value)}
+                    placeholder="输入 IQS API Key..."
+                    className="w-full px-2.5 py-1.5 rounded-lg border text-xs outline-none"
+                    style={{ borderColor, color: textColor, backgroundColor: 'var(--color-background)' }}
+                  />
+                  <button
+                    onClick={handleSaveIqsKey}
+                    disabled={iqsKeySaving || !iqsKeyInput.trim()}
+                    className="w-full py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80 disabled:opacity-40 text-white"
+                    style={{ backgroundColor: primaryColor }}>
+                    {iqsKeySaving ? '保存中...' : '保存'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1382,16 +1456,30 @@ export default function SettingsArea({ activeTab }: SettingsAreaProps) {
                         <table className="w-full text-sm">
                           <thead style={{ backgroundColor: 'var(--color-background-soft)' }}>
                             <tr style={{ color: 'var(--color-text-2)' }}>
-                              <th className="px-3 py-2.5 text-left font-medium">Chunk ID</th>
                               <th className="px-3 py-2.5 text-left font-medium">来源类型</th>
+                              <th className="px-3 py-2.5 text-left font-medium">Chunk ID</th>
+                              <th className="px-3 py-2.5 text-left font-medium">操作</th>
                             </tr>
                           </thead>
                           <tbody>
                             {memoryDetail.sources.map((s: any, i: number) => (
                               <tr key={i} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                                <td className="px-3 py-2.5 font-mono text-xs" style={{ color: primaryColor }}>{s.chunk_id || '-'}</td>
                                 <td className="px-3 py-2.5" style={{ color: 'var(--color-text-2)' }}>
                                   {s.source_type === 'chunk' ? '对话分段' : s.source_type === 'message' ? '消息' : s.source_type === 'attachment' ? '附件' : s.source_type === 'web_retrieval' ? '网页检索' : s.source_type}
+                                </td>
+                                <td className="px-3 py-2.5 font-mono text-xs" style={{ color: primaryColor }}>{s.chunk_id || '-'}</td>
+                                <td className="px-3 py-2.5">
+                                  {s.conversation_id ? (
+                                    <button
+                                      onClick={() => window.dispatchEvent(new CustomEvent('navigate-conversation', { detail: { conversationId: s.conversation_id } }))}
+                                      className="text-xs px-2 py-1 rounded border transition-colors hover:bg-black/5"
+                                      style={{ borderColor: primaryColor, color: primaryColor }}
+                                      title="跳转到原始对话">
+                                      <ExternalLink className="w-3 h-3 inline mr-1" />跳转
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs" style={{ color: 'var(--color-text-3)' }}>无法跳转</span>
+                                  )}
                                 </td>
                               </tr>
                             ))}

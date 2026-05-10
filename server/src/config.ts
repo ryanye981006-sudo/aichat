@@ -64,4 +64,12 @@ export const config = {
   // DeepSeek-OCR（硅基流动，替代 MinerU）
   ocrModel: process.env.SILICONFLOW_OCR_MODEL || 'deepseek-ai/DeepSeek-OCR',
   ocrPrompt: process.env.OCR_PROMPT || '<image>\nFree OCR.',
+
+  // 阿里云 IQS 搜索引擎
+  iqsApiKey: process.env.IQS_API_KEY || '',
+  iqsBaseUrl: 'https://cloud-iqs.aliyuncs.com',
+
+  // 工具调用轮次（每个工具独立计数）
+  maxToolCallPerTool: 3,       // 每个工具独立上限（5 个工具各 3 次）
+  maxTotalToolRounds: 6,       // 全局总轮次硬上限
 };

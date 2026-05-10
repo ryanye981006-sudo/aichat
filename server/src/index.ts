@@ -13,7 +13,9 @@ import modelsRouter from './routes/models.js';
 import memoryRouter from './routes/memory.js';
 import knowledgeRouter from './routes/knowledge.js';
 import profileRouter from './routes/profile.js';
+import settingsRouter from './routes/settings.js';
 import { conversationIdleDetector } from './services/ConversationIdleDetector.js';
+import { webSearchService } from './services/WebSearchService.js';
 
 const app = express();
 
@@ -27,6 +29,9 @@ getDb();
 // 启动空闲会话检测器（触发 B：会话空闲超时→强制提取记忆）
 conversationIdleDetector.start();
 
+// 初始化搜索引擎
+webSearchService.initFromConfig();
+
 // API 路由
 app.use('/api/assistants', assistantsRouter);
 app.use('/api/conversations', conversationsRouter);
@@ -37,6 +42,7 @@ app.use('/api/models', modelsRouter);
 app.use('/api/memory', memoryRouter);
 app.use('/api/knowledge', knowledgeRouter);
 app.use('/api/profile', profileRouter);
+app.use('/api/settings', settingsRouter);
 
 // 健康检查
 app.get('/api/health', (_req, res) => {

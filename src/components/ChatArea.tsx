@@ -4,12 +4,15 @@ import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
 import { getFileCategory, checkFileAllowed, getSupportedExts } from '../lib/modelCapabilities';
 import { knowledgeApi } from '../services/api';
-import { Send, Paperclip, BrainCircuit, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle, X, Shield } from 'lucide-react';
+import { Send, Paperclip, Book, User, Copy, RefreshCw, Check, ChevronDown, Square, AlertTriangle, X, Shield } from 'lucide-react';
 import { Tooltip, message as antMessage } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
 import EmojiIcon from './shared/EmojiIcon';
 import CitationBlock from './shared/CitationBlock';
+import ToolCallBlock from './ToolCallBlock';
+import DeepThinkingButton from './DeepThinkingButton';
+import WebSearchToggleButton from './WebSearchToggleButton';
 
 interface ChatAreaProps {
   assistant: Assistant | null;
@@ -28,6 +31,10 @@ interface ChatAreaProps {
   conversationId?: string | null;
   conversationPrivacyMode?: number;
   onTogglePrivacyMode?: () => void;
+  deepThinkingMode?: 'auto' | 'enabled' | 'disabled';
+  onDeepThinkingChange?: (mode: 'auto' | 'enabled' | 'disabled') => void;
+  webSearchEnabled?: boolean;
+  onWebSearchToggle?: () => void;
 }
 
 /** 格式化时间: YYYY-MM-DD HH:mm:ss */
@@ -50,13 +57,14 @@ export default function ChatArea({
   assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
   providers, models, onRegenerate, citations = [], kbSearchStatus, assistantKbCacheRef,
   conversationId, conversationPrivacyMode, onTogglePrivacyMode,
+  deepThinkingMode = 'auto', onDeepThinkingChange,
+  webSearchEnabled = false, onWebSearchToggle,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [thinkingMode, setThinkingMode] = useState<string>(assistant?.thinking_mode || 'default');
-  const [showThinkDropdown, setShowThinkDropdown] = useState(false);
-  const thinkDropdownRef = useRef<HTMLDivElement>(null);
+  // thinkingMode 从 deepThinkingMode prop 派生: auto → 'default'（跟随助手）
+  const thinkingMode = deepThinkingMode === 'auto' ? (assistant?.thinking_mode || 'default') : deepThinkingMode;
 
   // 知识库选择
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -98,28 +106,18 @@ export default function ChatArea({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
-  // 同步 assistant 的 thinking_mode 变化
-  useEffect(() => {
-    if (assistant?.thinking_mode) {
-      setThinkingMode(assistant.thinking_mode);
-    }
-  }, [assistant?.thinking_mode]);
-
   // 点击外部关闭下拉
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (thinkDropdownRef.current && !thinkDropdownRef.current.contains(e.target as Node)) {
-        setShowThinkDropdown(false);
-      }
       if (kbDropdownRef.current && !kbDropdownRef.current.contains(e.target as Node)) {
         setShowKbDropdown(false);
       }
     };
-    if (showThinkDropdown || showKbDropdown) {
+    if (showKbDropdown) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showThinkDropdown, showKbDropdown]);
+  }, [showKbDropdown]);
 
   // 读取文件为 dataUrl
   const readFileAsDataUrl = (file: File): Promise<string> => {
@@ -260,19 +258,6 @@ export default function ChatArea({
   const currentModel = model;
   const showThinkButton = isReasoningModel(currentModel);
 
-  const thinkOptions = [
-    { value: 'default', label: '默认' },
-    { value: 'enabled', label: '开启' },
-    { value: 'disabled', label: '关闭' },
-  ];
-  const currentThinkLabel = thinkOptions.find(o => o.value === thinkingMode)?.label || '默认';
-
-  const handleThinkModeSelect = (mode: string) => {
-    setThinkingMode(mode);
-    setShowThinkDropdown(false);
-    onThinkingModeChange?.(mode);
-  };
-
   // 计算当前实际发送给 LLM 的上下文轮数（后端会按 context_rounds 截断）
   const nonSystemMessages = messages.filter(m => m.role !== 'system');
   const totalRounds = Math.ceil(nonSystemMessages.filter(m => m.role === 'user').length) + (input.trim() && !isStreaming ? 1 : 0);
@@ -388,29 +373,9 @@ export default function ChatArea({
                   )}
                   {/* 工具调用块 */}
                   {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
-                    <div className="flex flex-col gap-1 w-full">
+                    <div className="flex flex-col gap-0.5 w-full">
                       {message.toolCalls.map(tc => (
-                        <div key={tc.toolCallId} className="text-xs px-3 py-2 rounded-lg border" style={{
-                          backgroundColor: 'var(--color-background-soft)',
-                          borderColor: 'var(--color-border-soft)',
-                          color: 'var(--color-text-2)',
-                        }}>
-                          <div className="flex items-center gap-1.5">
-                            <BrainCircuit className="w-3 h-3" style={{ color: 'var(--color-primary)' }} />
-                            <span className="font-medium">{tc.toolName}</span>
-                            {tc.status === 'running' && (
-                              <span className="animate-pulse" style={{ color: 'var(--color-primary)' }}>执行中...</span>
-                            )}
-                            {tc.status === 'done' && <Check className="w-3 h-3" style={{ color: '#12C175' }} />}
-                          </div>
-                          {tc.status === 'done' && tc.result && (
-                            <div className="mt-1 opacity-70">
-                              {typeof tc.result === 'string'
-                                ? tc.result.slice(0, 200)
-                                : JSON.stringify(tc.result).slice(0, 200)}
-                            </div>
-                          )}
-                        </div>
+                        <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
                       ))}
                     </div>
                   )}
@@ -573,48 +538,18 @@ export default function ChatArea({
             <div className="flex items-center justify-between px-3 pb-3">
               <div className="flex items-center gap-1.5">
                 {/* 深度思考按钮 */}
-                {showThinkButton && (
-                  <div className="relative" ref={thinkDropdownRef}>
-                    <button
-                      type="button"
-                      onClick={() => setShowThinkDropdown(!showThinkDropdown)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors border"
-                      style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}
-                    >
-                      <BrainCircuit className="w-3 h-3" />
-                      {currentThinkLabel}
-                      <ChevronDown className="w-3 h-3" />
-                    </button>
-                    {showThinkDropdown && (
-                      <div className="absolute bottom-full left-0 mb-1.5 rounded-xl border shadow-lg py-1 z-50 min-w-[200px]"
-                        style={{
-                          backgroundColor: 'var(--color-background)',
-                          borderColor: 'var(--color-border)',
-                        }}>
-                        {thinkOptions.map(option => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => handleThinkModeSelect(option.value)}
-                            className="w-full text-left px-4 py-2.5 hover:bg-black/5 transition-colors"
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1">
-                                <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{option.label}</div>
-                                <div className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>
-                                  {option.value === 'default' ? '按模型行为默认' : option.value === 'enabled' ? '强制开启深度思考' : '强制关闭深度思考'}
-                                </div>
-                              </div>
-                              {thinkingMode === option.value && (
-                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
-                              )}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <DeepThinkingButton
+                  mode={deepThinkingMode}
+                  onChange={(mode) => {
+                    onDeepThinkingChange?.(mode);
+                    onThinkingModeChange?.(mode === 'auto' ? 'default' : mode);
+                  }}
+                  visible={showThinkButton}
+                />
+                {/* 联网搜索按钮 */}
+                {assistant?.enable_web_search ? (
+                  <WebSearchToggleButton enabled={webSearchEnabled} onChange={() => onWebSearchToggle?.()} />
+                ) : null}
                 {/* 知识库选择按钮 */}
                 {availableKbs.length > 0 && (
                   <div className="relative" ref={kbDropdownRef}>

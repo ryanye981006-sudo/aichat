@@ -166,7 +166,7 @@ export class MemoryService {
   // --- 新增方法 ---
 
   // 带 source_links 的记忆存储
-  async addMemoryWithSource(content: string, topic: string | null, chunkId: string, sourceConversationId?: string, llmImportance?: number): Promise<string> {
+  async addMemoryWithSource(content: string, topic: string | null, chunkId: string, sourceConversationId?: string, llmImportance?: number, trigger: 'topic_shift' | 'session_idle' = 'topic_shift'): Promise<string> {
     const db = getDb();
     const hash = sha256(content);
 
@@ -202,7 +202,7 @@ export class MemoryService {
       number_count: heuristic.numbers,
       total_word_count: heuristic.totalWords,
       specificity: heuristic.specificity,
-      extraction_trigger: 'topic_shift',
+      extraction_trigger: trigger,
       source_chunk_ids: [chunkId],
       proper_nouns: [],
       topic: topic || '',
@@ -310,9 +310,12 @@ export class MemoryService {
 
     if (!memory) return null;
 
-    const sources = db.prepare(
-      'SELECT * FROM memory_source_links WHERE memory_id = ?'
-    ).all(memoryId) as any[];
+    const sources = db.prepare(`
+      SELECT msl.*, cc.conversation_id
+      FROM memory_source_links msl
+      LEFT JOIN conversation_chunks cc ON msl.chunk_id = cc.id
+      WHERE msl.memory_id = ?
+    `).all(memoryId) as any[];
 
     return { ...memory, sources };
   }

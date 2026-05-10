@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import AssistantModal from './components/AssistantModal';
 import SettingsArea from './components/SettingsArea';
-import type { Assistant, Provider, Model, Conversation, Message } from './types';
+import type { Assistant, Provider, Model, Conversation, Message, ConversationUIState } from './types';
 import { assistantsApi, conversationsApi, messagesApi, providersApi, modelsApi, chatSSE, regenerateSSE } from './services/api';
 import { generateId } from './lib/utils';
 
@@ -25,6 +25,9 @@ export default function App() {
   const [citationsByConv, setCitationsByConv] = useState<Record<string, any[]>>({});
   const [kbSearchStatus, setKbSearchStatus] = useState<string | null>(null);
 
+  // 会话级 UI 状态：深度思考 + 联网搜索（按会话缓存，切换重置）
+  const [conversationUIState, setConversationUIState] = useState<Record<string, ConversationUIState>>({});
+
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
@@ -41,9 +44,40 @@ export default function App() {
   // 当前会话的 citations，从 citationsByConv 按 conversationId 派生
   const citations = currentConversationId ? (citationsByConv[currentConversationId] || []) : [];
 
+  // 当前助手
+  const currentAssistant = assistants.find(a => a.id === currentAssistantId) || null;
+
+  // 当前会话 UI 状态（深度思考模式 + 联网搜索开关）
+  const currentUIState: ConversationUIState = currentConversationId
+    ? conversationUIState[currentConversationId] || {
+        deepThinkingMode: 'auto',
+        webSearchEnabled: !!(currentAssistant?.enable_web_search),
+      }
+    : { deepThinkingMode: 'auto', webSearchEnabled: false };
+
+  const setCurrentUIState = (updates: Partial<ConversationUIState>) => {
+    if (!currentConversationId) return;
+    setConversationUIState(prev => ({
+      ...prev,
+      [currentConversationId]: { ...currentUIState, ...updates },
+    }));
+  };
+
   // ===== 初始化加载 =====
   useEffect(() => {
     loadInitialData();
+  }, []);
+
+  // 监听记忆来源跳转事件（从 SettingsArea 记忆详情弹窗触发）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.conversationId) {
+        setCurrentConversationId(detail.conversationId);
+      }
+    };
+    window.addEventListener('navigate-conversation', handler);
+    return () => window.removeEventListener('navigate-conversation', handler);
   }, []);
 
   const loadInitialData = async () => {
@@ -82,6 +116,19 @@ export default function App() {
         normalized.citations = JSON.parse(normalized.citations);
       } catch {
         normalized.citations = null;
+      }
+    }
+
+    // 解析 tool_calls JSON 字符串
+    if (typeof normalized.tool_calls === 'string' && normalized.tool_calls) {
+      try {
+        normalized.toolCalls = JSON.parse(normalized.tool_calls).map((tc: any) => ({
+          ...tc,
+          startedAt: tc.started_at,
+          completedAt: tc.completed_at,
+        }));
+      } catch {
+        normalized.toolCalls = undefined;
       }
     }
 
@@ -739,8 +786,6 @@ export default function App() {
     } catch (e) { console.error(e); }
   }, [currentAssistantId]);
 
-  const currentAssistant = assistants.find(a => a.id === currentAssistantId) || null;
-
   return (
     <div className="flex flex-col h-screen" style={{ backgroundColor: 'var(--color-background)' }}>
       <div className="flex flex-1 overflow-hidden">
@@ -782,6 +827,10 @@ export default function App() {
             assistantKbCacheRef={assistantKbCacheRef}
             conversationId={currentConversationId}
             conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
+            deepThinkingMode={currentUIState.deepThinkingMode}
+            onDeepThinkingChange={(mode) => setCurrentUIState({ deepThinkingMode: mode })}
+            webSearchEnabled={currentUIState.webSearchEnabled}
+            onWebSearchToggle={() => setCurrentUIState({ webSearchEnabled: !currentUIState.webSearchEnabled })}
             onTogglePrivacyMode={() => {
               if (!currentConversationId) return;
               const current = conversations.find(c => c.id === currentConversationId);

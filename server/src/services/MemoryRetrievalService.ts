@@ -6,6 +6,7 @@ import { embeddingService } from './EmbeddingService.js';
 import { rerankerService } from './RerankerService.js';
 import { cosineSimilarity } from '../utils/vector.js';
 import { config } from '../config.js';
+import { readFileSync, existsSync } from 'fs';
 import type { MemorySearchResult } from '../types/index.js';
 
 export class MemoryRetrievalService {
@@ -210,12 +211,26 @@ export class MemoryRetrievalService {
 
     const attachments = (db.prepare(attachmentQuery).all(
       ...chunkIds, ...(sourceIds || [])
-    ) as any[]).map(a => ({
-      source_id: a.source_id,
-      name: a.name,
-      type: a.type,
-      content: `[文件: ${a.name}, 路径: ${a.path}]`,
-    }));
+    ) as any[]).map(a => {
+      let content = `[文件: ${a.name}]`;
+      if (a.path && existsSync(a.path)) {
+        // 图片/音视频等二进制文件返回描述，文本文件读取原文
+        if (/\.(png|jpe?g|gif|webp|svg|ico|bmp|mp3|wav|ogg|mp4|webm|avi)$/i.test(a.path)) {
+          content = `[${a.type === 'image' ? '图片' : '媒体文件'}: ${a.name}]`;
+        } else {
+          try {
+            content = readFileSync(a.path, 'utf-8');
+            // 限制单文件最大 50000 字符，防止炸上下文
+            if (content.length > 50000) {
+              content = content.slice(0, 50000) + '\n\n[... 文件过长，已截断]';
+            }
+          } catch {
+            content = `[无法读取文件: ${a.name}]`;
+          }
+        }
+      }
+      return { source_id: a.source_id, name: a.name, type: a.type, content };
+    });
 
     // 网页检索全文
     let webQuery = `

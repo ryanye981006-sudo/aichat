@@ -11,6 +11,7 @@ export interface Assistant {
   temperature_enabled: number;
   context_rounds: number;
   enable_memory: number;
+  enable_web_search: number;
   knowledge_base_ids: string;
   thinking_mode: string;
   created_at: string;
@@ -163,6 +164,25 @@ export interface ToolCallEntry {
   args: Record<string, unknown>;
   result?: unknown;
   status: 'pending' | 'running' | 'done' | 'error';
+  startedAt?: string;
+  completedAt?: string;
+}
+
+// 工具调用展示块（前端渲染用，含展示配置）
+export interface ToolCallBlock {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  status: 'running' | 'done' | 'error';
+  startedAt: string;
+  completedAt?: string;
+}
+
+// 会话级 UI 状态（按钮区，不持久化到 DB）
+export interface ConversationUIState {
+  deepThinkingMode: 'auto' | 'enabled' | 'disabled';
+  webSearchEnabled: boolean;
 }
 
 export interface MemoryDetail {
