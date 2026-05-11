@@ -167,16 +167,10 @@ export default function ChatArea({
   const kbDropdownRef = useRef<HTMLDivElement>(null);
   const availableKbs = knowledgeBases.filter(kb => kb.document_count > 0);
 
-  // 从缓存或助手默认配置恢复 KB 选择
+  // 从缓存恢复 KB 选择，无缓存时默认不选择任何知识库
   const getCachedKbIds = (): string[] => {
     if (!assistant?.id) return [];
-    const cached = assistantKbCacheRef.current[assistant.id];
-    if (cached) return cached;
-    // 无缓存时使用助手的默认知识库配置
-    try {
-      const defaults = JSON.parse((assistant as any).knowledge_base_ids || '[]');
-      return Array.isArray(defaults) ? defaults : [];
-    } catch { return []; }
+    return assistantKbCacheRef.current[assistant.id] || [];
   };
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>(getCachedKbIds);
 
