@@ -37,8 +37,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
   const [temperatureEnabled, setTemperatureEnabled] = useState(false);
   const [temperature, setTemperature] = useState(0.7);
   const [contextRounds, setContextRounds] = useState(10);
-  const [enableMemory, setEnableMemory] = useState(false);
-  const [enableWebSearch, setEnableWebSearch] = useState(false);
   const [thinkingMode, setThinkingMode] = useState('default');
   const [showModelSelect, setShowModelSelect] = useState(false);
   // 知识库关联
@@ -62,8 +60,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setTemperatureEnabled(!!assistant.temperature_enabled);
         setTemperature(assistant.temperature ?? 0.7);
         setContextRounds(assistant.context_rounds ?? 10);
-        setEnableMemory(!!assistant.enable_memory);
-        setEnableWebSearch(!!assistant.enable_web_search);
         setThinkingMode(assistant.thinking_mode || 'default');
         // 解析已关联的知识库 ID
         try {
@@ -82,8 +78,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
         setTemperatureEnabled(false);
         setTemperature(0.7);
         setContextRounds(10);
-        setEnableMemory(false);
-        setEnableWebSearch(false);
         setThinkingMode('default');
         setSelectedKbIds([]);
       }
@@ -106,8 +100,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
       temperature_enabled: temperatureEnabled ? 1 : 0,
       temperature,
       context_rounds: contextRounds,
-      enable_memory: enableMemory ? 1 : 0,
-      enable_web_search: enableWebSearch ? 1 : 0,
       thinking_mode: thinkingMode,
       knowledge_base_ids: JSON.stringify(selectedKbIds),
     });
@@ -336,36 +328,6 @@ export default function AssistantModal({ isOpen, onClose, onSave, assistant, pro
                     ) : null;
                   })()}
 
-                  {/* Memory Toggle */}
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>启用记忆</label>
-                    <button
-                      type="button"
-                      className={cn("w-11 h-6 rounded-full transition-colors relative")}
-                      style={{ backgroundColor: enableMemory ? 'var(--color-primary)' : 'var(--color-border)' }}
-                      onClick={() => setEnableMemory(!enableMemory)}
-                    >
-                      <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm",
-                        enableMemory ? "left-[22px]" : "left-1")} />
-                    </button>
-                  </div>
-
-                  {/* Web Search Toggle */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <label className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>默认启用联网搜索</label>
-                      <div className="text-[11px]" style={{ color: 'var(--color-text-3)' }}>新建会话时该助手默认开启联网搜索</div>
-                    </div>
-                    <button
-                      type="button"
-                      className={cn("w-11 h-6 rounded-full transition-colors relative flex-shrink-0")}
-                      style={{ backgroundColor: enableWebSearch ? '#16a34a' : 'var(--color-border)' }}
-                      onClick={() => setEnableWebSearch(!enableWebSearch)}
-                    >
-                      <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm",
-                        enableWebSearch ? "left-[22px]" : "left-1")} />
-                    </button>
-                  </div>
                 </div>
               )}
 

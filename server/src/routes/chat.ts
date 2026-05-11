@@ -55,6 +55,10 @@ router.post('/completions', async (req: Request, res: Response) => {
     ? (db.prepare('SELECT name FROM providers WHERE id = ?').get(model.provider_id) as any)?.name || ''
     : '';
 
+  // 全局记忆开关（memory_settings 表）
+  const memorySettings = db.prepare('SELECT enabled FROM memory_settings WHERE id = 1').get() as any;
+  const globalMemoryEnabled = memorySettings?.enabled === 1;
+
   // 确保对话存在
   let activeConvId = conversation_id;
   if (!activeConvId) {
@@ -75,7 +79,7 @@ router.post('/completions', async (req: Request, res: Response) => {
   const userMsgId = uuidv4();
   db.prepare(
     'INSERT INTO messages (id, conversation_id, role, content, raw_content, model_name, provider_name, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(userMsgId, activeConvId, 'user', message, message, modelName || null, providerName || null, turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode);
+  ).run(userMsgId, activeConvId, 'user', message, message, modelName || null, providerName || null, turnIndex, globalMemoryEnabled ? 1 : 0, convPrivacyMode);
 
   // 更新对话时间
   db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
@@ -212,11 +216,11 @@ router.post('/completions', async (req: Request, res: Response) => {
   }
 
   // 确定联网搜索开关：助手设置 + 搜索引擎已配置
-  const webSearchEnabled = !!(assistant.enable_web_search && webSearchService.isAvailable());
+  const webSearchEnabled = webSearchService.isAvailable();
 
   // 构建记忆工具（含 execute 包装 + per-tool 调用上限）
   const toolSchemas = toolDefinitionBuilder.buildTools({
-    memoryEnabled: !!assistant.enable_memory,
+    memoryEnabled: globalMemoryEnabled,
     webSearchEnabled,
   });
   let tools: Record<string, any> | undefined;
@@ -307,7 +311,7 @@ router.post('/completions', async (req: Request, res: Response) => {
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
           toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null,
-          turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode,
+          turnIndex, globalMemoryEnabled ? 1 : 0, convPrivacyMode,
         );
 
         // 更新对话时间
@@ -387,7 +391,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, assistant.enable_memory ? 1 : 0, convPrivacyMode);
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, globalMemoryEnabled ? 1 : 0, convPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -422,6 +426,10 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   const providerName = model
     ? (db.prepare('SELECT name FROM providers WHERE id = ?').get(model.provider_id) as any)?.name || ''
     : '';
+
+  // 全局记忆开关（memory_settings 表）
+  const memorySettings = db.prepare('SELECT enabled FROM memory_settings WHERE id = 1').get() as any;
+  const globalMemoryEnabled = memorySettings?.enabled === 1;
 
   // 验证消息存在且为助手消息
   const targetMsg = db.prepare('SELECT * FROM messages WHERE id = ? AND conversation_id = ? AND role = ?').get(message_id, conversation_id, 'assistant') as any;
@@ -563,15 +571,15 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
   // 获取原始消息的 turn_index 和快照（重新生成时复用）
   const regenTurnIndex = targetMsg.turn_index || lastUserMsg.turn_index || 0;
-  const regenMemoryEnabled = lastUserMsg.memory_enabled ?? (assistant.enable_memory ? 1 : 0);
+  const regenMemoryEnabled = lastUserMsg.memory_enabled ?? (globalMemoryEnabled ? 1 : 0);
   const regenPrivacyMode = lastUserMsg.privacy_mode ?? 0;
 
-  // 确定联网搜索开关：助手设置 + 搜索引擎已配置
-  const regenWebSearchEnabled = !!(assistant.enable_web_search && webSearchService.isAvailable());
+  // 联网搜索：引擎已配置则可用
+  const regenWebSearchEnabled = webSearchService.isAvailable();
 
   // 构建工具（含 per-tool 调用上限）
   const regenToolSchemas = toolDefinitionBuilder.buildTools({
-    memoryEnabled: !!assistant.enable_memory,
+    memoryEnabled: globalMemoryEnabled,
     webSearchEnabled: regenWebSearchEnabled,
   });
   let regenTools: Record<string, any> | undefined;

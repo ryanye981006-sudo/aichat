@@ -27,7 +27,7 @@ router.post('/', (req, res) => {
   const {
     name, system_prompt, emoji,
     model_id, provider_id, temperature, temperature_enabled,
-    context_rounds, enable_memory, knowledge_base_ids, thinking_mode
+    context_rounds, knowledge_base_ids, thinking_mode
   } = req.body;
 
   if (!name) {
@@ -35,8 +35,8 @@ router.post('/', (req, res) => {
   }
 
   const id = uuidv4();
-  db.prepare(`INSERT INTO assistants (id, name, system_prompt, emoji, model_id, provider_id, temperature, temperature_enabled, context_rounds, enable_memory, enable_web_search, knowledge_base_ids, thinking_mode)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  db.prepare(`INSERT INTO assistants (id, name, system_prompt, emoji, model_id, provider_id, temperature, temperature_enabled, context_rounds, knowledge_base_ids, thinking_mode)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id,
     name,
     system_prompt || '',
@@ -46,8 +46,6 @@ router.post('/', (req, res) => {
     temperature ?? 0.7,
     temperature_enabled ? 1 : 0,
     context_rounds ?? 10,
-    enable_memory ? 1 : 0,
-    req.body.enable_web_search ? 1 : 0,
     Array.isArray(knowledge_base_ids) ? JSON.stringify(knowledge_base_ids) : (knowledge_base_ids || '[]'),
     thinking_mode || 'default'
   );
@@ -67,7 +65,7 @@ router.put('/:id', (req, res) => {
   const fields = [
     'name', 'system_prompt', 'emoji',
     'model_id', 'provider_id', 'temperature', 'temperature_enabled',
-    'context_rounds', 'enable_memory', 'enable_web_search', 'thinking_mode'
+    'context_rounds', 'thinking_mode'
   ];
   const updates: string[] = [];
   const values: any[] = [];
@@ -75,7 +73,7 @@ router.put('/:id', (req, res) => {
   for (const field of fields) {
     if (req.body[field] !== undefined) {
       updates.push(`${field} = ?`);
-      if (field === 'temperature_enabled' || field === 'enable_memory' || field === 'enable_web_search') {
+      if (field === 'temperature_enabled') {
         values.push(req.body[field] ? 1 : 0);
       } else {
         values.push(req.body[field]);

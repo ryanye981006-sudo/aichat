@@ -663,10 +663,8 @@ export default function ChatArea({
                   }}
                   visible={showThinkButton}
                 />
-                {/* 联网搜索按钮 */}
-                {assistant?.enable_web_search ? (
-                  <WebSearchToggleButton enabled={webSearchEnabled} onChange={() => onWebSearchToggle?.()} />
-                ) : null}
+                {/* 智能搜索按钮 */}
+                <WebSearchToggleButton enabled={webSearchEnabled} onChange={() => onWebSearchToggle?.()} />
                 {/* 知识库选择按钮 */}
                 {availableKbs.length > 0 && (
                   <div className="relative" ref={kbDropdownRef}>

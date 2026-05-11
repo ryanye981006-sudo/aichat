@@ -51,9 +51,9 @@ export default function App() {
   const currentUIState: ConversationUIState = currentConversationId
     ? conversationUIState[currentConversationId] || {
         deepThinkingMode: true,
-        webSearchEnabled: !!(currentAssistant?.enable_web_search),
+        webSearchEnabled: true,
       }
-    : { deepThinkingMode: true, webSearchEnabled: false };
+    : { deepThinkingMode: true, webSearchEnabled: true };
 
   const setCurrentUIState = (updates: Partial<ConversationUIState>) => {
     if (!currentConversationId) return;
