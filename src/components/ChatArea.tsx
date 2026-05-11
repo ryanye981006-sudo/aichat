@@ -31,8 +31,8 @@ interface ChatAreaProps {
   conversationId?: string | null;
   conversationPrivacyMode?: number;
   onTogglePrivacyMode?: () => void;
-  deepThinkingMode?: 'auto' | 'enabled' | 'disabled';
-  onDeepThinkingChange?: (mode: 'auto' | 'enabled' | 'disabled') => void;
+  deepThinkingMode?: boolean;
+  onDeepThinkingChange?: (mode: boolean) => void;
   webSearchEnabled?: boolean;
   onWebSearchToggle?: () => void;
 }
@@ -152,14 +152,14 @@ export default function ChatArea({
   assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
   providers, models, onRegenerate, citations = [], kbSearchStatus, assistantKbCacheRef,
   conversationId, conversationPrivacyMode, onTogglePrivacyMode,
-  deepThinkingMode = 'auto', onDeepThinkingChange,
+  deepThinkingMode = true, onDeepThinkingChange,
   webSearchEnabled = false, onWebSearchToggle,
 }: ChatAreaProps) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  // thinkingMode 从 deepThinkingMode prop 派生: auto → 'default'（跟随助手）
-  const thinkingMode = deepThinkingMode === 'auto' ? (assistant?.thinking_mode || 'default') : deepThinkingMode;
+  // thinkingMode 从 deepThinkingMode prop 派生
+  const thinkingMode = deepThinkingMode ? 'enabled' : 'disabled';
 
   // 知识库选择
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -657,9 +657,9 @@ export default function ChatArea({
                 {/* 深度思考按钮 */}
                 <DeepThinkingButton
                   mode={deepThinkingMode}
-                  onChange={(mode) => {
-                    onDeepThinkingChange?.(mode);
-                    onThinkingModeChange?.(mode === 'auto' ? 'default' : mode);
+                  onChange={(enabled) => {
+                    onDeepThinkingChange?.(enabled);
+                    onThinkingModeChange?.(enabled ? 'enabled' : 'disabled');
                   }}
                   visible={showThinkButton}
                 />

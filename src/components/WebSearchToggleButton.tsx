@@ -24,7 +24,7 @@ export default function WebSearchToggleButton({ enabled, onChange }: WebSearchTo
       }}
     >
       <Globe className="w-3 h-3" />
-      联网
+      智能搜索
     </button>
   );
 }

@@ -187,7 +187,7 @@ export interface ToolCallBlock {
 
 // 会话级 UI 状态（按钮区，不持久化到 DB）
 export interface ConversationUIState {
-  deepThinkingMode: 'auto' | 'enabled' | 'disabled';
+  deepThinkingMode: boolean;  // true=强制开启, false=强制关闭
   webSearchEnabled: boolean;
 }
 

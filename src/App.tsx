@@ -50,10 +50,10 @@ export default function App() {
   // 当前会话 UI 状态（深度思考模式 + 联网搜索开关）
   const currentUIState: ConversationUIState = currentConversationId
     ? conversationUIState[currentConversationId] || {
-        deepThinkingMode: 'auto',
+        deepThinkingMode: true,
         webSearchEnabled: !!(currentAssistant?.enable_web_search),
       }
-    : { deepThinkingMode: 'auto', webSearchEnabled: false };
+    : { deepThinkingMode: true, webSearchEnabled: false };
 
   const setCurrentUIState = (updates: Partial<ConversationUIState>) => {
     if (!currentConversationId) return;
