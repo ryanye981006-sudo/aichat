@@ -1,5 +1,8 @@
 // 工具调用块渲染组件：在助手消息中展示工具调用的状态和结果
+// 支持展开查看搜索结果详情
 
+import { useState } from 'react';
+import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface ToolCallEntry {
@@ -50,8 +53,8 @@ const TOOL_DISPLAY_CONFIG: Record<string, {
     colorClass: 'tool-green',
     runningText: '搜索网页中...',
     doneText: (r: any) => {
-      const items = Array.isArray(r) ? r : (r?.raw || r?.citations);
-      const count = Array.isArray(items) ? items.length : 0;
+      const items = Array.isArray(r?.raw) ? r.raw : (Array.isArray(r?.citations) ? r.citations : []);
+      const count = items.length;
       return `搜索到 ${count} 条网页结果`;
     },
   },
@@ -74,41 +77,123 @@ function computeDuration(startedAt?: string, completedAt?: string): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+// 渲染 web_search 结果详情
+function WebSearchDetail({ result }: { result: any }) {
+  const citations = result?.citations || result?.raw || [];
+  if (!Array.isArray(citations) || citations.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {citations.map((c: any) => (
+        <div key={c.id || c.title} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
+          <div className="flex items-start gap-1.5">
+            <span className="flex-shrink-0 rounded-full w-4 h-4 inline-flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: '#16a34a' }}>{c.id || ''}</span>
+            <div className="flex-1 min-w-0">
+              <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline" style={{ color: 'var(--color-text)' }}>
+                {c.title}
+              </a>
+              {c.snippet && (
+                <p className="mt-0.5 leading-relaxed opacity-70" style={{ color: 'var(--color-text-2)' }}>
+                  {c.snippet.length > 200 ? c.snippet.slice(0, 200) + '...' : c.snippet}
+                </p>
+              )}
+            </div>
+            {c.url && (
+              <a href={c.url} target="_blank" rel="noopener noreferrer" className="flex-shrink-0 opacity-50 hover:opacity-100" title="打开链接">
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// 渲染 search_memory 结果详情
+function MemorySearchDetail({ result }: { result: any }) {
+  const memories = Array.isArray(result) ? result : result?.memories || [];
+  if (!Array.isArray(memories) || memories.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {memories.map((m: any, idx: number) => (
+        <div key={m.id || idx} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
+          <div className="font-medium" style={{ color: 'var(--color-text)' }}>{m.content || m.title || m.name}</div>
+          {m.score !== undefined && (
+            <span className="text-[10px] opacity-50" style={{ color: 'var(--color-text-3)' }}>
+              相似度: {(Number(m.score) * 100).toFixed(0)}%
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ToolCallBlock({ toolCall, depth = 0 }: { toolCall: ToolCallEntry; depth?: number }) {
   const config = TOOL_DISPLAY_CONFIG[toolCall.toolName];
+  const [expanded, setExpanded] = useState(false);
   if (!config) return null;
 
   const isRunning = toolCall.status === 'running' || toolCall.status === 'pending';
+  const isDone = toolCall.status === 'done';
   const dur = computeDuration(toolCall.startedAt, toolCall.completedAt);
   const queryArg = toolCall.args?.query as string | undefined;
   const memoryArg = toolCall.args?.memory_id as string | undefined;
   const urlArg = toolCall.args?.url as string | undefined;
+  const hasDetail = isDone && toolCall.result != null;
 
   // 缩进连接线
   const indentPx = depth * 20;
 
   return (
-    <div
-      className={cn('tool-call-block flex items-start gap-2 py-1 text-xs', config.colorClass)}
-      style={{ paddingLeft: indentPx }}
-    >
-      {depth > 0 && <span className="text-[10px] opacity-40 select-none" style={{ marginLeft: -8 }}>├─</span>}
-      <span className="flex-shrink-0 mt-0.5">{config.icon}</span>
-      <div className="flex-1 min-w-0">
-        <span className="font-medium">{isRunning ? config.runningText : config.doneText(toolCall.result)}</span>
-        {queryArg && !isRunning && (
-          <span className="opacity-60 ml-1">: "{queryArg}"</span>
-        )}
-        {memoryArg && !isRunning && (
-          <span className="opacity-60 ml-1">: {memoryArg.slice(0, 12)}</span>
-        )}
-        {urlArg && !isRunning && (
-          <span className="opacity-60 ml-1">: {urlArg.slice(0, 50)}</span>
-        )}
-        {dur && (
-          <span className="opacity-40 ml-2">{dur}</span>
-        )}
+    <div className={cn('tool-call-block py-1 text-xs', config.colorClass)} style={{ paddingLeft: indentPx }}>
+      <div
+        className={cn('flex items-start gap-2', hasDetail && 'cursor-pointer hover:opacity-80')}
+        onClick={() => hasDetail && setExpanded(!expanded)}
+      >
+        {depth > 0 && <span className="text-[10px] opacity-40 select-none" style={{ marginLeft: -8 }}>├─</span>}
+        <span className="flex-shrink-0 mt-0.5">{config.icon}</span>
+        <div className="flex-1 min-w-0">
+          <span className="font-medium">{isRunning ? config.runningText : config.doneText(toolCall.result)}</span>
+          {queryArg && !isRunning && (
+            <span className="opacity-60 ml-1">: "{queryArg}"</span>
+          )}
+          {memoryArg && !isRunning && (
+            <span className="opacity-60 ml-1">: {memoryArg.slice(0, 12)}</span>
+          )}
+          {urlArg && !isRunning && (
+            <span className="opacity-60 ml-1">: {urlArg.slice(0, 50)}</span>
+          )}
+          {dur && (
+            <span className="opacity-40 ml-2">{dur}</span>
+          )}
+          {hasDetail && (
+            <span className="inline-flex items-center ml-1.5" style={{ color: 'var(--color-primary)' }}>
+              {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* 搜索结果详情 */}
+      {expanded && hasDetail && (
+        <>
+          {toolCall.toolName === 'web_search' && <WebSearchDetail result={toolCall.result} />}
+          {toolCall.toolName === 'search_memory' && <MemorySearchDetail result={toolCall.result} />}
+          {toolCall.toolName === 'web_fetch' && (
+            <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
+              <div className="font-medium" style={{ color: 'var(--color-text)' }}>
+                {(toolCall.result as any)?.title || '网页'}
+              </div>
+              <div className="mt-1 leading-relaxed whitespace-pre-wrap opacity-70 max-h-40 overflow-y-auto" style={{ color: 'var(--color-text-2)' }}>
+                {typeof (toolCall.result as any)?.content === 'string' ? (toolCall.result as any).content.slice(0, 1000) : ''}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
