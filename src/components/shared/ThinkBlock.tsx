@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { BrainCircuit, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface ThinkBlockProps {
-  content: string;
+  content?: string;
+  children?: ReactNode;
 }
 
-export default function ThinkBlock({ content }: ThinkBlockProps) {
+export default function ThinkBlock({ content, children }: ThinkBlockProps) {
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -25,8 +26,8 @@ export default function ThinkBlock({ content }: ThinkBlockProps) {
         {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
       </button>
       {expanded && (
-        <div className="px-4 pb-3 text-sm leading-relaxed whitespace-pre-wrap" style={{ color: 'var(--color-text-2)' }}>
-          {content}
+        <div className="px-4 pb-3 text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+          {children || <span className="whitespace-pre-wrap">{content}</span>}
         </div>
       )}
     </div>

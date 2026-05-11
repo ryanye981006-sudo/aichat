@@ -72,9 +72,15 @@ export interface Message {
   citations?: any[] | null;
   aborted?: boolean;
   toolCalls?: ToolCallEntry[];
+  reasoningSegments?: ReasoningSegment[];
   created_at: string;
   isStreaming?: boolean;
 }
+
+// 深度思考与工具调用的交错片段
+export type ReasoningSegment =
+  | { type: 'reasoning'; text: string }
+  | { type: 'tool_call'; toolCall: ToolCallEntry };
 
 export interface MemorySettings {
   id: number;

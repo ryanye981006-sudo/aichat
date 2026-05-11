@@ -50,7 +50,8 @@ const TOOL_DISPLAY_CONFIG: Record<string, {
     colorClass: 'tool-green',
     runningText: '搜索网页中...',
     doneText: (r: any) => {
-      const count = Array.isArray(r) ? r.length : 0;
+      const items = Array.isArray(r) ? r : (r?.raw || r?.citations);
+      const count = Array.isArray(items) ? items.length : 0;
       return `搜索到 ${count} 条网页结果`;
     },
   },

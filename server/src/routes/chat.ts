@@ -95,7 +95,9 @@ router.post('/completions', async (req: Request, res: Response) => {
   }
 
   // 构建系统提示词（整合记忆 + 知识库）
+  const today = new Date().toISOString().slice(0, 10);
   let systemContent = assistant.system_prompt || '';
+  systemContent += `\n\n今天的日期是 ${today}。当用户要求搜索"最新"、"最近"、"今天"等内容时，请使用此日期作为参考。`;
 
   // 注入用户个人信息（固定拼接，不走检索）
   systemContent += userProfileService.buildProfileSection();
@@ -444,7 +446,9 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   }
 
   // 构建系统提示词（注入用户个人信息，记忆改为工具检索）
+  const today2 = new Date().toISOString().slice(0, 10);
   let systemContent = assistant.system_prompt || '';
+  systemContent += `\n\n今天的日期是 ${today2}。当用户要求搜索"最新"、"最近"、"今天"等内容时，请使用此日期作为参考。`;
   systemContent += userProfileService.buildProfileSection();
   let kbIds: string[] = [];
   if (Array.isArray(kb_ids)) {

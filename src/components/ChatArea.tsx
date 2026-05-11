@@ -463,16 +463,38 @@ export default function ChatArea({
                     {isUser ? '用户' : (message.model_name ? `${message.model_name} | ${message.provider_name || ''}` : assistantLabel)}
                   </span>
 
-                  {message.thought_process && (
-                    <ThinkBlock content={message.thought_process} />
-                  )}
-                  {/* 工具调用块 */}
-                  {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
-                    <div className="flex flex-col gap-0.5 w-full">
-                      {computeNestedToolCalls(message.toolCalls).map(({ toolCall: tc, depth }) => (
-                        <ToolCallBlock key={tc.toolCallId} toolCall={tc} depth={depth} />
-                      ))}
-                    </div>
+                  {/* 深度思考 + 工具调用：有 reasoningSegments 时交错渲染，否则回退旧布局 */}
+                  {!isUser && message.reasoningSegments && message.reasoningSegments.length > 0 ? (
+                    <ThinkBlock>
+                      {(() => {
+                        // 从交错片段中提取所有工具调用，计算嵌套深度
+                        const allTc = message.reasoningSegments.filter(s => s.type === 'tool_call').map(s => s.toolCall);
+                        const nested = computeNestedToolCalls(allTc);
+                        const depthMap = new Map(nested.map(n => [n.toolCall.toolCallId, n.depth]));
+                        return message.reasoningSegments.map((seg, i) =>
+                          seg.type === 'reasoning' ? (
+                            <div key={i} className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                              {seg.text}
+                            </div>
+                          ) : (
+                            <ToolCallBlock key={seg.toolCall.toolCallId} toolCall={seg.toolCall} depth={depthMap.get(seg.toolCall.toolCallId) ?? 0} />
+                          )
+                        );
+                      })()}
+                    </ThinkBlock>
+                  ) : (
+                    <>
+                      {message.thought_process && (
+                        <ThinkBlock content={message.thought_process} />
+                      )}
+                      {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+                        <div className="flex flex-col gap-0.5 w-full">
+                          {computeNestedToolCalls(message.toolCalls).map(({ toolCall: tc, depth }) => (
+                            <ToolCallBlock key={tc.toolCallId} toolCall={tc} depth={depth} />
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                   {/* 消息气泡 */}
                   {message.content ? (
