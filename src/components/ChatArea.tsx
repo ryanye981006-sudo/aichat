@@ -457,39 +457,67 @@ export default function ChatArea({
                     {isUser ? '用户' : (message.model_name ? `${message.model_name} | ${message.provider_name || ''}` : assistantLabel)}
                   </span>
 
-                  {/* 深度思考 + 工具调用：有 reasoningSegments 时交错渲染，否则回退旧布局 */}
-                  {!isUser && message.reasoningSegments && message.reasoningSegments.length > 0 ? (
-                    <ThinkBlock>
-                      {(() => {
-                        // 从交错片段中提取所有工具调用，计算嵌套深度
-                        const allTc = message.reasoningSegments.filter(s => s.type === 'tool_call').map(s => s.toolCall);
-                        const nested = computeNestedToolCalls(allTc);
-                        const depthMap = new Map(nested.map(n => [n.toolCall.toolCallId, n.depth]));
-                        return message.reasoningSegments.map((seg, i) =>
-                          seg.type === 'reasoning' ? (
-                            <div key={i} className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
-                              {seg.text}
-                            </div>
-                          ) : (
-                            <ToolCallBlock key={seg.toolCall.toolCallId} toolCall={seg.toolCall} depth={depthMap.get(seg.toolCall.toolCallId) ?? 0} />
-                          )
-                        );
-                      })()}
-                    </ThinkBlock>
-                  ) : (
-                    <>
-                      {message.thought_process && (
-                        <ThinkBlock content={message.thought_process} />
-                      )}
-                      {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+                  {/* 深度思考 + 工具调用 */}
+                  {!isUser && (() => {
+                    const hasSegments = message.reasoningSegments && message.reasoningSegments.length > 0;
+                    const segReasoning = message.reasoningSegments?.filter(s => s.type === 'reasoning');
+                    const segToolCalls = message.reasoningSegments?.filter(s => s.type === 'tool_call').map(s => s.toolCall);
+
+                    const thinkText = (segReasoning && segReasoning.length > 0)
+                      ? segReasoning.map(s => s.text).join('\n')
+                      : message.thought_process;
+                    const tcList = (segToolCalls && segToolCalls.length > 0) ? segToolCalls : (message.toolCalls || []);
+
+                    if (!thinkText && tcList.length === 0) return null;
+
+                    // 无思考内容时：工具调用独立显示，不套 ThinkBlock
+                    if (!thinkText) {
+                      return (
                         <div className="flex flex-col gap-0.5 w-full">
-                          {computeNestedToolCalls(message.toolCalls).map(({ toolCall: tc, depth }) => (
+                          {computeNestedToolCalls(tcList).map(({ toolCall: tc, depth }) => (
                             <ToolCallBlock key={tc.toolCallId} toolCall={tc} depth={depth} />
                           ))}
                         </div>
-                      )}
-                    </>
-                  )}
+                      );
+                    }
+
+                    // 有思考内容：reasoningSegments 交错渲染在 ThinkBlock 内
+                    if (hasSegments) {
+                      const allTc = message.reasoningSegments!.filter(s => s.type === 'tool_call').map(s => s.toolCall);
+                      const nested = computeNestedToolCalls(allTc);
+                      const depthMap = new Map(nested.map(n => [n.toolCall.toolCallId, n.depth]));
+                      return (
+                        <ThinkBlock>
+                          {(!segReasoning || segReasoning.length === 0) && message.thought_process && (
+                            <div className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                              {message.thought_process}
+                            </div>
+                          )}
+                          {message.reasoningSegments!.map((seg, i) =>
+                            seg.type === 'reasoning' ? (
+                              <div key={i} className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                                {seg.text}
+                              </div>
+                            ) : (
+                              <ToolCallBlock key={seg.toolCall.toolCallId} toolCall={seg.toolCall} depth={depthMap.get(seg.toolCall.toolCallId) ?? 0} />
+                            )
+                          )}
+                        </ThinkBlock>
+                      );
+                    }
+
+                    // 旧路径：thought_process + toolCalls 统一放入 ThinkBlock
+                    return (
+                      <ThinkBlock>
+                        <div className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+                          {thinkText}
+                        </div>
+                        {tcList.length > 0 && computeNestedToolCalls(tcList).map(({ toolCall: tc, depth }) => (
+                          <ToolCallBlock key={tc.toolCallId} toolCall={tc} depth={depth} />
+                        ))}
+                      </ThinkBlock>
+                    );
+                  })()}
                   {/* 消息气泡 */}
                   {message.content ? (
                     <div className={cn(

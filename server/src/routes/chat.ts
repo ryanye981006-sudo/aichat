@@ -27,7 +27,7 @@ function isQwenModel(modelName: string): boolean {
 }
 
 router.post('/completions', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message, thinking_mode, kb_ids } = req.body;
+  const { assistant_id, conversation_id, message, thinking_mode, kb_ids, web_search_enabled, memory_enabled } = req.body;
 
   if (!assistant_id || !message) {
     res.status(400).json({ error: 'assistant_id 和 message 不能为空' });
@@ -215,12 +215,14 @@ router.post('/completions', async (req: Request, res: Response) => {
     }
   }
 
-  // 确定联网搜索开关：助手设置 + 搜索引擎已配置
-  const webSearchEnabled = webSearchService.isAvailable();
+  // 确定联网搜索开关：前端请求参数优先，否则看搜索引擎是否可用
+  const webSearchEnabled = web_search_enabled !== undefined ? !!web_search_enabled : webSearchService.isAvailable();
+  // 记忆开关：前端请求参数优先，否则看全局设置
+  const effectiveMemoryEnabled = memory_enabled !== undefined ? !!memory_enabled : globalMemoryEnabled;
 
   // 构建记忆工具（含 execute 包装 + per-tool 调用上限）
   const toolSchemas = toolDefinitionBuilder.buildTools({
-    memoryEnabled: globalMemoryEnabled,
+    memoryEnabled: effectiveMemoryEnabled,
     webSearchEnabled,
   });
   let tools: Record<string, any> | undefined;
@@ -310,7 +312,11 @@ router.post('/completions', async (req: Request, res: Response) => {
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
-          toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null,
+          (() => {
+            // 过滤掉未完成的幽灵工具调用（status 仍为 running 且无实质参数/结果）
+            const cleaned = toolCallEntries.filter(e => !(e.status === 'running' && !e.result))
+            return cleaned.length > 0 ? JSON.stringify(cleaned) : null
+          })(),
           turnIndex, globalMemoryEnabled ? 1 : 0, convPrivacyMode,
         );
 
@@ -400,7 +406,7 @@ router.post('/completions', async (req: Request, res: Response) => {
 
 // 重新生成 —— 删除指定助手消息后重新调用 LLM
 router.post('/regenerate', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message_id, thinking_mode, kb_ids } = req.body;
+  const { assistant_id, conversation_id, message_id, thinking_mode, kb_ids, web_search_enabled, memory_enabled } = req.body;
 
   if (!assistant_id || !conversation_id || !message_id) {
     res.status(400).json({ error: 'assistant_id、conversation_id 和 message_id 不能为空' });
@@ -571,15 +577,15 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
   // 获取原始消息的 turn_index 和快照（重新生成时复用）
   const regenTurnIndex = targetMsg.turn_index || lastUserMsg.turn_index || 0;
-  const regenMemoryEnabled = lastUserMsg.memory_enabled ?? (globalMemoryEnabled ? 1 : 0);
   const regenPrivacyMode = lastUserMsg.privacy_mode ?? 0;
 
-  // 联网搜索：引擎已配置则可用
-  const regenWebSearchEnabled = webSearchService.isAvailable();
+  // 联网搜索：前端请求参数优先，否则看搜索引擎是否可用
+  const regenWebSearchEnabled = web_search_enabled !== undefined ? !!web_search_enabled : webSearchService.isAvailable();
+  const regenMemoryEnabled = memory_enabled !== undefined ? !!memory_enabled : globalMemoryEnabled;
 
   // 构建工具（含 per-tool 调用上限）
   const regenToolSchemas = toolDefinitionBuilder.buildTools({
-    memoryEnabled: globalMemoryEnabled,
+    memoryEnabled: regenMemoryEnabled,
     webSearchEnabled: regenWebSearchEnabled,
   });
   let regenTools: Record<string, any> | undefined;
@@ -658,7 +664,10 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
           citations.length > 0 ? JSON.stringify(citations) : null,
-          regenToolCallEntries.length > 0 ? JSON.stringify(regenToolCallEntries) : null,
+          (() => {
+            const cleaned = regenToolCallEntries.filter(e => !(e.status === 'running' && !e.result))
+            return cleaned.length > 0 ? JSON.stringify(cleaned) : null
+          })(),
           regenTurnIndex, regenMemoryEnabled, regenPrivacyMode,
         );
 
@@ -725,7 +734,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, regenToolCallEntries.length > 0 ? JSON.stringify(regenToolCallEntries) : null, regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, (() => { const c = regenToolCallEntries.filter(e => !(e.status === 'running' && !e.result)); return c.length > 0 ? JSON.stringify(c) : null; })(), regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }

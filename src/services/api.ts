@@ -140,6 +140,7 @@ export function chatSSE(
   },
   kbIds?: string[],
   files?: import('../types').FileAttachment[],
+  options?: { webSearchEnabled?: boolean; memoryEnabled?: boolean },
 ): AbortController {
   const controller = new AbortController();
 
@@ -153,6 +154,8 @@ export function chatSSE(
       thinking_mode: thinkingMode,
       files: files,
       kb_ids: kbIds,
+      web_search_enabled: options?.webSearchEnabled,
+      memory_enabled: options?.memoryEnabled,
     }),
     signal: controller.signal,
   }).then(async (response) => {
@@ -243,6 +246,7 @@ export function regenerateSSE(
     onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
   },
   kbIds?: string[],
+  options?: { webSearchEnabled?: boolean; memoryEnabled?: boolean },
 ): AbortController {
   const controller = new AbortController();
 
@@ -255,6 +259,8 @@ export function regenerateSSE(
       message_id: messageId,
       thinking_mode: thinkingMode,
       kb_ids: kbIds,
+      web_search_enabled: options?.webSearchEnabled,
+      memory_enabled: options?.memoryEnabled,
     }),
     signal: controller.signal,
   }).then(async (response) => {

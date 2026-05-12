@@ -129,21 +129,21 @@ export class AiSdkService {
 
       const sdkModel = createModel(provider, model)
 
-      // 构建 providerOptions：传递思考控制参数（多格式同时发送，厂商按需取用）
+      // 构建 providerOptions：传递思考控制参数
+      // 关键：key 必须与 createOpenAICompatible({ name }) 的 name 一致，
+      // 因为 AI SDK 用 name 作为 providerOptionsName 来查找 providerOptions。
+      // 使用 provider.name 作为 key（与 createModel 中的 name 参数一致）。
       const providerOptions: Record<string, any> = {}
+      const optsKey = provider.name
       if (thinkingMode === 'disabled') {
-        providerOptions.openaiCompatible = {
-          // AI SDK 识别的标准字段，映射为 reasoning_effort 请求参数
+        providerOptions[optsKey] = {
           reasoningEffort: 'none' as const,
-          // DashScope / SiliconFlow
           enable_thinking: false,
-          // DeepSeek / Anthropic 协议 / 豆包等
           thinking: { type: 'disabled' as const },
-          // Nvidia NIM
           chat_template_kwargs: { enable_thinking: false },
         }
       } else if (thinkingMode === 'enabled') {
-        providerOptions.openaiCompatible = {
+        providerOptions[optsKey] = {
           enable_thinking: true,
           thinking: { type: 'enabled' as const },
           chat_template_kwargs: { enable_thinking: true },
@@ -163,6 +163,16 @@ export class AiSdkService {
       const toolArgsAccumulator = new Map<string, string>()
       for await (const part of streamResult.fullStream) {
         if (abortSignal?.aborted) break
+
+        // 诊断日志：记录所有流事件类型（调试深度思考问题时启用）
+        if (['reasoning-delta', 'text-delta', 'tool-call', 'tool-result', 'error', 'reasoning', 'text'].includes(part.type)) {
+          const detail = part.type === 'text-delta' || part.type === 'reasoning-delta'
+            ? ` "${(part as any).text?.slice(0, 50)}"`
+            : part.type === 'tool-call' ? ` ${(part as any).toolName}(${JSON.stringify((part as any).input ?? (part as any).args).slice(0, 80)})`
+            : part.type === 'tool-result' ? ` ${(part as any).toolName}`
+            : ''
+          console.log(`[AiSdk] stream event: ${part.type}${detail}`)
+        }
 
         switch (part.type) {
           case 'text-delta': {

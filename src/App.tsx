@@ -523,9 +523,15 @@ export default function App() {
             ? { ...seg, toolCall: { ...seg.toolCall, result, status: 'done' as const } }
             : seg
         );
+        // 清除同工具名下无结果的幽灵 running 条目（模型有时会发空参数的预调用）
+        reasoningSegments = reasoningSegments.filter(seg =>
+          !(seg.type === 'tool_call' && seg.toolCall.toolName === toolName && seg.toolCall.status === 'running' && !seg.toolCall.result)
+        );
         const updateTr = (prev: Message[]) => prev.map(m =>
           m.id === aiMsg.id
-            ? { ...m, toolCalls: (m.toolCalls || []).map(tc =>
+            ? { ...m, toolCalls: (m.toolCalls || []).filter(tc =>
+                !(tc.toolName === toolName && tc.status === 'running' && !tc.result)
+              ).map(tc =>
                 tc.toolCallId === toolCallId ? { ...tc, result, status: 'done' as const } : tc
               ), reasoningSegments: [...reasoningSegments] }
             : m
@@ -562,7 +568,7 @@ export default function App() {
           }
         }
       },
-    }, kbIds, files);
+    }, kbIds, files, { webSearchEnabled: currentUIState.webSearchEnabled });
     abortControllersRef.current[activeConvId] = controller;
     setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
@@ -579,7 +585,7 @@ export default function App() {
 
     // 立即隐藏旧消息并显示 loading，不等服务端响应
     setMessages(prev => prev.map(m =>
-      m.id === messageId ? { ...m, content: '', raw_content: '', thought_process: null, isStreaming: true, aborted: false, metrics: undefined } : m
+      m.id === messageId ? { ...m, content: '', raw_content: '', thought_process: null, toolCalls: undefined, reasoningSegments: undefined, isStreaming: true, aborted: false, metrics: undefined } : m
     ));
     setIsStreaming(true);
     setStreamingConversationId(activeConvId);
@@ -601,7 +607,7 @@ export default function App() {
         effectiveMessageId = lastAi.id;
         // 用服务端真实记录替换 temp ID 消息，清空内容并保持 streaming 状态
         setMessages(prev => prev.map(m =>
-          m.id === messageId ? { ...lastAi, content: '', raw_content: '', thought_process: null, isStreaming: true, aborted: false, metrics: undefined } : m
+          m.id === messageId ? { ...lastAi, content: '', raw_content: '', thought_process: null, toolCalls: undefined, reasoningSegments: undefined, isStreaming: true, aborted: false, metrics: undefined } : m
         ));
       } catch {
         setIsStreaming(false);
@@ -789,7 +795,7 @@ export default function App() {
           }
         }
       },
-    }, kbIds);
+    }, kbIds, { webSearchEnabled: currentUIState.webSearchEnabled });
     abortControllersRef.current[activeConvId] = regenController;
     setAbortController(regenController);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages]);
