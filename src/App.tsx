@@ -545,6 +545,25 @@ export default function App() {
           if (cached) messagesCacheRef.current[activeConvId] = updateTr(cached);
         }
       },
+      onStepStart(step: number) {
+        // 多步工具执行：step 2+ 开始时刷新推理缓冲并清空前一步的草稿文本
+        if (currentReasoning) {
+          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
+          currentReasoning = '';
+        }
+        fullRawContent = '';
+        const updateStep = (prev: Message[]) => prev.map(m =>
+          m.id === aiMsg.id
+            ? { ...m, raw_content: '', content: '', thought_process: null }
+            : m
+        );
+        if (activeConvId === currentConversationIdRef.current) {
+          setMessages(updateStep);
+        } else {
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) messagesCacheRef.current[activeConvId] = updateStep(cached);
+        }
+      },
       onError(error) {
         setKbSearchStatus(null);
 
@@ -770,6 +789,24 @@ export default function App() {
         } else {
           const cached = messagesCacheRef.current[activeConvId];
           if (cached) messagesCacheRef.current[activeConvId] = updateTr(cached);
+        }
+      },
+      onStepStart(step: number) {
+        if (currentReasoning) {
+          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
+          currentReasoning = '';
+        }
+        fullRawContent = '';
+        const updateStep = (prev: Message[]) => prev.map(m =>
+          m.id === effectiveMessageId
+            ? { ...m, raw_content: '', content: '', thought_process: null }
+            : m
+        );
+        if (activeConvId === currentConversationIdRef.current) {
+          setMessages(updateStep);
+        } else {
+          const cached = messagesCacheRef.current[activeConvId];
+          if (cached) messagesCacheRef.current[activeConvId] = updateStep(cached);
         }
       },
       onError(error) {

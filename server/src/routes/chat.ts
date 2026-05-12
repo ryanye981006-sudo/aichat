@@ -248,6 +248,10 @@ router.post('/completions', async (req: Request, res: Response) => {
         execute: wrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args)),
       };
     }
+    // 注入工具使用规范：最终回复中不泄露内部标识
+    const toolInstruction = '\n\n## 回复规范\n在给用户的最终回复中，不要出现任何记忆 ID（如 UUID 格式的字符串）或内部工具名称（如 search_memory、recall_context）。用自然语言直接回答即可。';
+    systemContent += toolInstruction;
+    chatMessages[0].content += toolInstruction;
   }
 
   let fullRawContent = '';
@@ -317,7 +321,7 @@ router.post('/completions', async (req: Request, res: Response) => {
             const cleaned = toolCallEntries.filter(e => !(e.status === 'running' && !e.result))
             return cleaned.length > 0 ? JSON.stringify(cleaned) : null
           })(),
-          turnIndex, globalMemoryEnabled ? 1 : 0, convPrivacyMode,
+          turnIndex, effectiveMemoryEnabled ? 1 : 0, convPrivacyMode,
         );
 
         // 更新对话时间
@@ -397,7 +401,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, globalMemoryEnabled ? 1 : 0, convPrivacyMode);
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, effectiveMemoryEnabled ? 1 : 0, convPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -581,11 +585,12 @@ router.post('/regenerate', async (req: Request, res: Response) => {
 
   // 联网搜索：前端请求参数优先，否则看搜索引擎是否可用
   const regenWebSearchEnabled = web_search_enabled !== undefined ? !!web_search_enabled : webSearchService.isAvailable();
-  const regenMemoryEnabled = memory_enabled !== undefined ? !!memory_enabled : globalMemoryEnabled;
+  const regenMemoryBool = memory_enabled !== undefined ? !!memory_enabled : globalMemoryEnabled;
+  const regenMemoryEnabled = regenMemoryBool ? 1 : 0;
 
   // 构建工具（含 per-tool 调用上限）
   const regenToolSchemas = toolDefinitionBuilder.buildTools({
-    memoryEnabled: regenMemoryEnabled,
+    memoryEnabled: regenMemoryBool,
     webSearchEnabled: regenWebSearchEnabled,
   });
   let regenTools: Record<string, any> | undefined;
@@ -611,6 +616,8 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         execute: regenWrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args)),
       };
     }
+    const toolInstruction = '\n\n## 回复规范\n在给用户的最终回复中，不要出现任何记忆 ID（如 UUID 格式的字符串）或内部工具名称（如 search_memory、recall_context）。用自然语言直接回答即可。';
+    chatMessages[0].content += toolInstruction;
   }
 
   let fullRawContent = '';

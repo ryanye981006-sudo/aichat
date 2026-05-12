@@ -137,6 +137,7 @@ export function chatSSE(
     onStatus?: (message: string) => void;
     onToolCall?: (toolCallId: string, toolName: string, args: any) => void;
     onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
+    onStepStart?: (step: number) => void;
   },
   kbIds?: string[],
   files?: import('../types').FileAttachment[],
@@ -215,6 +216,9 @@ export function chatSSE(
             case 'tool_result':
               callbacks.onToolResult?.(data.toolCallId, data.toolName, data.result);
               break;
+            case 'step_start':
+              callbacks.onStepStart?.(data.step);
+              break;
           }
         } catch { /* 忽略解析错误 */ }
       }
@@ -244,6 +248,7 @@ export function regenerateSSE(
     onStatus?: (message: string) => void;
     onToolCall?: (toolCallId: string, toolName: string, args: any) => void;
     onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
+    onStepStart?: (step: number) => void;
   },
   kbIds?: string[],
   options?: { webSearchEnabled?: boolean; memoryEnabled?: boolean },
@@ -319,6 +324,9 @@ export function regenerateSSE(
               break;
             case 'tool_result':
               callbacks.onToolResult?.(data.toolCallId, data.toolName, data.result);
+              break;
+            case 'step_start':
+              callbacks.onStepStart?.(data.step);
               break;
 			  }
         } catch { /* 忽略解析错误 */ }

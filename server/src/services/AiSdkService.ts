@@ -30,6 +30,7 @@ export interface StreamCallbacks {
   onError: (error: Error) => void
   onToolCall?: (toolCallId: string, toolName: string, args: any) => void
   onToolResult?: (toolCallId: string, toolName: string, result: any) => void
+  onStepStart?: (step: number) => void
 }
 
 export interface StreamMetrics {
@@ -171,6 +172,7 @@ export class AiSdkService {
             // 多步执行：工具调用后的新步骤，清空前一步的文本累积，避免内容重复
             if (currentStep > 1) {
               fullText = ''
+              callbacks.onStepStart?.(currentStep)
             }
             break
           }
