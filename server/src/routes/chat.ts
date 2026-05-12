@@ -180,7 +180,7 @@ router.post('/completions', async (req: Request, res: Response) => {
   // 深度思考模式控制
   const thinkingMode = thinking_mode || 'default';
   const THINK_ENABLED_INSTRUCTION = '\n\n## 思考要求\n请在回答每个问题时，使用以下格式进行深度思考：\n<think>\n详细的分步推理过程...\n</think>\n\n最终答案。';
-  const THINK_DISABLED_INSTRUCTION = '\n\n## 思考要求\n请直接给出答案，不要输出任何思考过程或推理步骤，不要使用 <think> 标签。';
+  const THINK_DISABLED_INSTRUCTION = '\n\n## 思考要求\n请直接给出答案，不要输出任何思考过程或推理步骤，不要使用 <think> 标签。\n\n## 工具使用规则（必须遵守）\n你拥有 search_memory（检索长期记忆）和 web_search（联网搜索）两个工具。以下情况必须先调用工具，不得跳过：\n- 用户提到"之前""上次""还记得""讨论过""聊过"等词 → 必须先 search_memory\n- 用户询问实时信息（天气、价格、新闻、活动、优惠等） → 必须先 web_search\n- 用户要求"搜索""查一下""搜一下" → 必须先执行对应搜索\n- 不确定某个事实或数据时 → 先搜索，不要猜测';
   if (thinkingMode === 'enabled') {
     systemContent += THINK_ENABLED_INSTRUCTION;
   } else if (thinkingMode === 'disabled') {
@@ -245,7 +245,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     for (const [name, def] of Object.entries(toolSchemas)) {
       tools[name] = {
         ...def,
-        execute: wrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args)),
+        execute: wrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args, message)),
       };
     }
     // 注入工具使用规范：最终回复中不泄露内部标识
@@ -539,7 +539,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   if (regenThinkingMode === 'enabled') {
     systemContent += '\n\n## 思考要求\n请在回答每个问题时，使用以下格式进行深度思考：\n<think>\n详细的分步推理过程...\n</think>\n\n最终答案。';
   } else if (regenThinkingMode === 'disabled') {
-    systemContent += '\n\n## 思考要求\n请直接给出答案，不要输出任何思考过程或推理步骤，不要使用 <think> 标签。';
+    systemContent += '\n\n## 思考要求\n请直接给出答案，不要输出任何思考过程或推理步骤，不要使用 <think> 标签。\n\n## 工具使用规则（必须遵守）\n你拥有 search_memory（检索长期记忆）和 web_search（联网搜索）两个工具。以下情况必须先调用工具，不得跳过：\n- 用户提到"之前""上次""还记得""讨论过""聊过"等词 → 必须先 search_memory\n- 用户询问实时信息（天气、价格、新闻、活动、优惠等） → 必须先 web_search\n- 用户要求"搜索""查一下""搜一下" → 必须先执行对应搜索\n- 不确定某个事实或数据时 → 先搜索，不要猜测';
   }
 
   // 上下文轮数截断
@@ -613,7 +613,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     for (const [name, def] of Object.entries(regenToolSchemas)) {
       regenTools[name] = {
         ...def,
-        execute: regenWrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args)),
+        execute: regenWrapWithLimit(name, async (args: any) => toolExecutor.execute(name, args, lastUserMsg.content)),
       };
     }
     const toolInstruction = '\n\n## 回复规范\n在给用户的最终回复中，不要出现任何记忆 ID（如 UUID 格式的字符串）或内部工具名称（如 search_memory、recall_context）。用自然语言直接回答即可。';

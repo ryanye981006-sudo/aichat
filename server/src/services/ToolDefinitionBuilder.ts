@@ -15,9 +15,9 @@ export class ToolDefinitionBuilder {
 
     if (memoryEnabled) {
       tools.search_memory = {
-        description: '搜索用户的长期记忆，获取之前对话中记录的事实、偏好和上下文。当你不确定用户是否提到过某个信息时，使用此工具搜索。',
+        description: '搜索用户的长期记忆，获取之前对话中记录的事实、偏好和上下文。当你不确定用户是否提到过某个信息时，使用此工具搜索。可以一次提供多个查询角度并行检索。',
         parameters: z.object({
-          query: z.string().describe('搜索关键词，用自然语言写检索词'),
+          queries: z.array(z.string()).describe('搜索关键词列表，每个是自然语言检索词。可以给 1-3 个不同角度的查询，例如 ["用户偏好", "杭州旅游", "出行计划"]'),
           limit: z.number().optional().default(5).describe('返回条数，默认 5'),
         }),
       };
@@ -38,10 +38,10 @@ export class ToolDefinitionBuilder {
 
     if (webSearchEnabled) {
       tools.web_search = {
-        description: '搜索互联网，获取最新信息、事实、数据。当你不确定某个事实、需要最新信息、或用户明确要求上网查时使用。',
+        description: '搜索互联网，获取最新信息、事实、数据。当你不确定某个事实、需要最新信息、或用户明确要求上网查时使用。可以一次提供多个查询角度并行检索。',
         parameters: z.object({
-          query: z.string().describe('检索关键词（模型根据用户问题提炼）'),
-          max_results: z.number().optional().default(5).describe('返回条数，默认 5，最大 10'),
+          queries: z.array(z.string()).describe('检索关键词列表。可以给 1-3 个不同角度的查询，例如 ["杭州天气 2026-05", "杭州旅游攻略", "宋城门票"]'),
+          max_results: z.number().optional().default(5).describe('每个查询返回条数，默认 5，最大 10'),
           time_range: z.enum(['NoLimit', 'OneDay', 'OneWeek', 'OneMonth', 'OneYear']).optional().default('NoLimit').describe('时间范围'),
         }),
       };
