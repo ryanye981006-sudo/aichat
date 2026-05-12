@@ -485,7 +485,9 @@ export default function App() {
           setAbortController(null);
           delete abortControllersRef.current[activeConvId];
           delete messagesCacheRef.current[activeConvId];
-          if (activeConvId) loadMessages(activeConvId);
+          // 不再调用 loadMessages：finalizeMessage 已包含正确的 reasoningSegments 交错顺序，
+          // loadMessages 会从 DB 加载扁平数据，丢失工具调用的位置信息。
+          // 用户切换会话时 loadMessages 仍会触发，保证数据一致性。
           if (currentAssistantId) loadConversations(currentAssistantId);
         } else {
           // 用户已切走：更新缓存为完成态，不污染当前会话的全局状态

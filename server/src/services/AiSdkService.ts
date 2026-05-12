@@ -160,21 +160,20 @@ export class AiSdkService {
       })
       // 使用 fullStream 消费 —— 既可获取文本也能从 finish 事件获取 usage
       let reasoningText = ''
+      let currentStep = 0
       const toolArgsAccumulator = new Map<string, string>()
       for await (const part of streamResult.fullStream) {
         if (abortSignal?.aborted) break
 
-        // 诊断日志：记录所有流事件类型（调试深度思考问题时启用）
-        if (['reasoning-delta', 'text-delta', 'tool-call', 'tool-result', 'error', 'reasoning', 'text'].includes(part.type)) {
-          const detail = part.type === 'text-delta' || part.type === 'reasoning-delta'
-            ? ` "${(part as any).text?.slice(0, 50)}"`
-            : part.type === 'tool-call' ? ` ${(part as any).toolName}(${JSON.stringify((part as any).input ?? (part as any).args).slice(0, 80)})`
-            : part.type === 'tool-result' ? ` ${(part as any).toolName}`
-            : ''
-          console.log(`[AiSdk] stream event: ${part.type}${detail}`)
-        }
-
         switch (part.type) {
+          case 'start-step': {
+            currentStep++
+            // 多步执行：工具调用后的新步骤，清空前一步的文本累积，避免内容重复
+            if (currentStep > 1) {
+              fullText = ''
+            }
+            break
+          }
           case 'text-delta': {
             if (firstTokenTime === 0) {
               firstTokenTime = Date.now()
