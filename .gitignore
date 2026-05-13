@@ -11,3 +11,6 @@ data/eval/
 uploads/
 scripts/eval/
 server/src/eval/
+release/
+server-dist/
+electron/bin/

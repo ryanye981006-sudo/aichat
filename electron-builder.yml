@@ -1,0 +1,36 @@
+appId: com.aichat.desktop
+productName: aichat
+npmRebuild: false
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**/*
+  - electron/**/*
+  # node_modules 不在 asar 中，改为 extraResources（供独立 node.exe 运行时读取）
+  - package.json
+  - "!electron/bin"
+  - "!node_modules"
+  - "!server"
+  - "!server-dist/data"
+  - "!test-files"
+  - "!scripts"
+  - "!*.md"
+  - "!*.ts"
+  - "!tsconfig.json"
+win:
+  target:
+    - target: zip
+      arch: [x64]
+  icon: build/icon.ico
+  signAndEditExecutable: false
+extraResources:
+  # 便携版 Node.js 运行时（运行后端服务）
+  - from: electron/bin/node.exe
+    to: node.exe
+  # 编译后的后端代码
+  - from: server-dist
+    to: server-dist
+  # 生产依赖（供后端 node.exe 加载）
+  - from: node_modules
+    to: node_modules

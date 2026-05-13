@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
         '@': path.resolve(__dirname, './src'),
       },
     },
+    base: mode === 'production' ? './' : '/',
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "outDir": "server-dist",
+    "rootDir": "server",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowImportingTsExtensions": false,
+    "noEmit": false
+  },
+  "include": ["server/src/**/*.ts", "server/src/**/*.json"],
+  "exclude": ["node_modules", "server/src/eval"]
+}

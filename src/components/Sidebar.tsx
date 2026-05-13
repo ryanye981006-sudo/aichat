@@ -1,6 +1,6 @@
 import type { Assistant, Conversation } from '../types';
 import { cn } from '../lib/utils';
-import { Plus, MoreHorizontal, MessageSquare, Settings, Brain, Pencil, Trash2, User } from 'lucide-react';
+import { Plus, MoreHorizontal, MessageSquare, Settings, Brain, Pencil, Trash2, User, Monitor } from 'lucide-react';
 import EmojiIcon from './shared/EmojiIcon';
 import { useState, useEffect, useRef } from 'react';
 
@@ -22,13 +22,15 @@ interface SidebarProps {
   onSettingsTabChange: (tab: 'model' | 'memory' | 'profile') => void;
   sidebarTab: 'assistants' | 'topics';
   onSidebarTabChange: (tab: 'assistants' | 'topics') => void;
+  isWindowedPreview: boolean;
+  onToggleWindowedPreview: () => void;
 }
 
 export default function Sidebar({
   assistants, conversations, currentAssistantId, currentConversationId,
   onSelectAssistant, onSelectConversation, onCreateAssistant, onCreateConversation,
   onEditAssistant, onRemoveAssistant, onRemoveConversation, isSettingsMode, onToggleSettings, settingsTab, onSettingsTabChange,
-  sidebarTab, onSidebarTabChange
+  sidebarTab, onSidebarTabChange, isWindowedPreview, onToggleWindowedPreview
 }: SidebarProps) {
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -268,7 +270,17 @@ export default function Sidebar({
       )}
 
       {!isSettingsMode && (
-        <div className="p-3 border-t" style={{ borderColor }}>
+        <div className="p-3 border-t space-y-1.5" style={{ borderColor }}>
+          <button
+            onClick={onToggleWindowedPreview}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors"
+            style={{ color: textSecondary }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = bgMute)}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+          >
+            <Monitor className="w-4 h-4" />
+            {isWindowedPreview ? '全屏预览' : '窗口预览'}
+          </button>
           <button
             onClick={() => onToggleSettings(true)}
             className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors"
@@ -278,6 +290,20 @@ export default function Sidebar({
           >
             <Settings className="w-4 h-4" />
             设置
+          </button>
+        </div>
+      )}
+      {isSettingsMode && (
+        <div className="p-3 border-t" style={{ borderColor }}>
+          <button
+            onClick={onToggleWindowedPreview}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors"
+            style={{ color: textSecondary }}
+            onMouseEnter={e => (e.currentTarget.style.backgroundColor = bgMute)}
+            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+          >
+            <Monitor className="w-4 h-4" />
+            {isWindowedPreview ? '全屏预览' : '窗口预览'}
           </button>
         </div>
       )}

@@ -1,6 +1,8 @@
 // API 调用封装层
 
-const BASE_URL = '/api';
+// 浏览器 dev 模式走 Vite proxy (/api)，Electron 模式直连 Express
+const isElectron = !!(typeof window !== 'undefined' && (window as any).electronAPI?.isElectron);
+const BASE_URL = isElectron ? 'http://localhost:3001/api' : '/api';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {

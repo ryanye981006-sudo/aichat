@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import AssistantModal from './components/AssistantModal';
 import SettingsArea from './components/SettingsArea';
+import WindowFrame from './components/WindowFrame';
 import type { Assistant, Provider, Model, Conversation, Message, ConversationUIState } from './types';
 import { assistantsApi, conversationsApi, messagesApi, providersApi, modelsApi, chatSSE, regenerateSSE } from './services/api';
 import { generateId } from './lib/utils';
@@ -22,6 +23,9 @@ export default function App() {
   const [settingsTab, setSettingsTab] = useState<'model' | 'memory' | 'profile'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+
+  // 窗口预览模式（开发阶段模拟 Electron 窗口效果）
+  const [isWindowedPreview, setIsWindowedPreview] = useState(false);
 
   // 会话级 UI 状态：深度思考 + 联网搜索（按会话缓存，切换重置）
   const [conversationUIState, setConversationUIState] = useState<Record<string, ConversationUIState>>({});
@@ -816,67 +820,74 @@ export default function App() {
   }, [currentAssistantId]);
 
   return (
-    <div className="flex flex-col h-screen" style={{ backgroundColor: 'var(--color-background)' }}>
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          assistants={assistants}
-          conversations={conversations}
-          currentAssistantId={currentAssistantId}
-          currentConversationId={currentConversationId}
-          onSelectAssistant={handleSelectAssistant}
-          onSelectConversation={handleSelectConversation}
-          onCreateAssistant={handleCreateAssistant}
-          onCreateConversation={handleCreateConversation}
-          onEditAssistant={handleEditAssistant}
-          onRemoveAssistant={handleRemoveAssistant}
-          onRemoveConversation={handleRemoveConversation}
-          isSettingsMode={isSettingsMode}
-          onToggleSettings={setIsSettingsMode}
-          settingsTab={settingsTab}
-          onSettingsTabChange={setSettingsTab}
-          sidebarTab={sidebarTab}
-          onSidebarTabChange={setSidebarTab}
-        />
-        {isSettingsMode ? (
-          <SettingsArea activeTab={settingsTab} />
-        ) : (
-          <ChatArea
-            assistant={currentAssistant}
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            isStreaming={isStreaming}
-            onStopGeneration={handleStopGeneration}
+    <WindowFrame
+      isWindowed={isWindowedPreview}
+      onToggleWindowed={() => setIsWindowedPreview(!isWindowedPreview)}
+    >
+      <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--color-background)' }}>
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar
+            assistants={assistants}
+            conversations={conversations}
+            currentAssistantId={currentAssistantId}
+            currentConversationId={currentConversationId}
+            onSelectAssistant={handleSelectAssistant}
+            onSelectConversation={handleSelectConversation}
+            onCreateAssistant={handleCreateAssistant}
+            onCreateConversation={handleCreateConversation}
             onEditAssistant={handleEditAssistant}
-            onThinkingModeChange={handleThinkingModeChange}
-            onRegenerate={handleRegenerate}
-            providers={providers}
-            models={models}
-            conversationId={currentConversationId}
-            conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
-            deepThinkingMode={currentUIState.deepThinkingMode}
-            onDeepThinkingChange={(mode) => setCurrentUIState({ deepThinkingMode: mode })}
-            webSearchEnabled={currentUIState.webSearchEnabled}
-            onWebSearchToggle={() => setCurrentUIState({ webSearchEnabled: !currentUIState.webSearchEnabled })}
-            onTogglePrivacyMode={() => {
-              if (!currentConversationId) return;
-              const current = conversations.find(c => c.id === currentConversationId);
-              const newMode = current?.privacy_mode ? 0 : 1;
-              conversationsApi.update(currentConversationId, { privacy_mode: newMode }).then(c => {
-                setConversations(prev => prev.map(x => x.id === c.id ? c : x));
-              }).catch(() => {});
-            }}
+            onRemoveAssistant={handleRemoveAssistant}
+            onRemoveConversation={handleRemoveConversation}
+            isSettingsMode={isSettingsMode}
+            onToggleSettings={setIsSettingsMode}
+            settingsTab={settingsTab}
+            onSettingsTabChange={setSettingsTab}
+            sidebarTab={sidebarTab}
+            onSidebarTabChange={setSidebarTab}
+            isWindowedPreview={isWindowedPreview}
+            onToggleWindowedPreview={() => setIsWindowedPreview(!isWindowedPreview)}
           />
-        )}
-      </div>
+          {isSettingsMode ? (
+            <SettingsArea activeTab={settingsTab} />
+          ) : (
+            <ChatArea
+              assistant={currentAssistant}
+              messages={messages}
+              onSendMessage={handleSendMessage}
+              isStreaming={isStreaming}
+              onStopGeneration={handleStopGeneration}
+              onEditAssistant={handleEditAssistant}
+              onThinkingModeChange={handleThinkingModeChange}
+              onRegenerate={handleRegenerate}
+              providers={providers}
+              models={models}
+              conversationId={currentConversationId}
+              conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
+              deepThinkingMode={currentUIState.deepThinkingMode}
+              onDeepThinkingChange={(mode) => setCurrentUIState({ deepThinkingMode: mode })}
+              webSearchEnabled={currentUIState.webSearchEnabled}
+              onWebSearchToggle={() => setCurrentUIState({ webSearchEnabled: !currentUIState.webSearchEnabled })}
+              onTogglePrivacyMode={() => {
+                if (!currentConversationId) return;
+                const current = conversations.find(c => c.id === currentConversationId);
+                const newMode = current?.privacy_mode ? 0 : 1;
+                conversationsApi.update(currentConversationId, { privacy_mode: newMode }).then(c => {
+                  setConversations(prev => prev.map(x => x.id === c.id ? c : x));
+                }).catch(() => {});
+              }}
+            />
+          )}
+        </div>
 
-      <AssistantModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onSave={handleSaveAssistant}
-        assistant={editingAssistant}
-        providers={providers}
-        models={models}
-      />
-    </div>
+        <AssistantModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          onSave={handleSaveAssistant}
+          assistant={editingAssistant}
+          providers={providers}
+          models={models}
+        />
+      </div>
+    </WindowFrame>
   );
 }
