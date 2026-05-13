@@ -1,5 +1,5 @@
 import { createContext, useContext, useReducer, ReactNode } from 'react';
-import type { Assistant, Provider, Model, Conversation, Message, MemorySettings, KnowledgeBase } from '../types';
+import type { Assistant, Provider, Model, Conversation, Message, MemorySettings } from '../types';
 
 // 应用全局状态
 interface AppState {
@@ -9,12 +9,11 @@ interface AppState {
   conversations: Conversation[];
   messages: Message[];
   memorySettings: MemorySettings | null;
-  knowledgeBases: KnowledgeBase[];
   activeAssistantId: string | null;
   activeConversationId: string | null;
   isStreaming: boolean;
   isSettingsMode: boolean;
-  settingsTab: 'model' | 'rag' | 'memory';
+  settingsTab: 'model' | 'memory';
 }
 
 type AppAction =
@@ -40,11 +39,8 @@ type AppAction =
   | { type: 'SET_ACTIVE_CONVERSATION'; payload: string | null }
   | { type: 'SET_STREAMING'; payload: boolean }
   | { type: 'SET_SETTINGS_MODE'; payload: boolean }
-  | { type: 'SET_SETTINGS_TAB'; payload: 'model' | 'rag' | 'memory' }
-  | { type: 'SET_MEMORY_SETTINGS'; payload: MemorySettings }
-  | { type: 'SET_KNOWLEDGE_BASES'; payload: KnowledgeBase[] }
-  | { type: 'ADD_KNOWLEDGE_BASE'; payload: KnowledgeBase }
-  | { type: 'REMOVE_KNOWLEDGE_BASE'; payload: string };
+  | { type: 'SET_SETTINGS_TAB'; payload: 'model' | 'memory' }
+  | { type: 'SET_MEMORY_SETTINGS'; payload: MemorySettings };
 
 const initialState: AppState = {
   assistants: [],
@@ -53,7 +49,6 @@ const initialState: AppState = {
   conversations: [],
   messages: [],
   memorySettings: null,
-  knowledgeBases: [],
   activeAssistantId: null,
   activeConversationId: null,
   isStreaming: false,
@@ -87,9 +82,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_SETTINGS_MODE': return { ...state, isSettingsMode: action.payload };
     case 'SET_SETTINGS_TAB': return { ...state, settingsTab: action.payload };
     case 'SET_MEMORY_SETTINGS': return { ...state, memorySettings: action.payload };
-    case 'SET_KNOWLEDGE_BASES': return { ...state, knowledgeBases: action.payload };
-    case 'ADD_KNOWLEDGE_BASE': return { ...state, knowledgeBases: [...state.knowledgeBases, action.payload] };
-    case 'REMOVE_KNOWLEDGE_BASE': return { ...state, knowledgeBases: state.knowledgeBases.filter(k => k.id !== action.payload) };
     default: return state;
   }
 }

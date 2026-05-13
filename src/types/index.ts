@@ -12,7 +12,6 @@ export interface Assistant {
   context_rounds: number;
   enable_memory: number;
   enable_web_search: number;
-  knowledge_base_ids: string;
   thinking_mode: string;
   created_at: string;
   updated_at: string;
@@ -69,7 +68,6 @@ export interface Message {
   model_name?: string | null;
   provider_name?: string | null;
   metrics?: MessageMetrics | null;
-  citations?: any[] | null;
   aborted?: boolean;
   toolCalls?: ToolCallEntry[];
   reasoningSegments?: ReasoningSegment[];
@@ -90,40 +88,6 @@ export interface MemorySettings {
   embedding_provider_id: string | null;
   embedding_model_id: string | null;
   embedding_dimension: number;
-  updated_at: string;
-}
-
-export interface KnowledgeBase {
-  id: string;
-  name: string;
-  embedding_provider_id: string | null;
-  embedding_model_id: string | null;
-  chunk_size: number;
-  chunk_overlap: number;
-  search_top_k: number;
-  similarity_threshold: number;
-  chunk_strategy: 'paragraph' | 'sentence' | 'recursive';
-  enable_query_rewrite: number;
-  enable_rerank: number;
-  rerank_provider_id: string | null;
-  rerank_model_id: string | null;
-  document_count: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface KnowledgeDocument {
-  id: string;
-  knowledge_base_id: string;
-  source_type: 'file' | 'url' | 'note';
-  file_path: string | null;
-  file_name: string;
-  processing_status: 'pending' | 'loading' | 'chunking' | 'embedding' | 'completed' | 'error';
-  chunk_count: number;
-  recall_count: number;
-  error_message: string | null;
-  processing_config: string | null;
-  created_at: string;
   updated_at: string;
 }
 

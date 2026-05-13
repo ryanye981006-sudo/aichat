@@ -3,7 +3,6 @@ import { Router, Request, Response } from 'express';
 import { getDb } from '../db/connection.js';
 import { aiSdkService as aiService } from '../services/AiSdkService.js';
 import { memoryService } from '../services/MemoryService.js';
-import { knowledgeService } from '../services/KnowledgeService.js';
 import { loaderService } from '../services/LoaderService.js';
 import { userProfileService } from '../services/UserProfileService.js';
 import { conversationChunkService } from '../services/ConversationChunkService.js';
@@ -27,7 +26,7 @@ function isQwenModel(modelName: string): boolean {
 }
 
 router.post('/completions', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message, thinking_mode, kb_ids, web_search_enabled, memory_enabled } = req.body;
+  const { assistant_id, conversation_id, message, thinking_mode, web_search_enabled, memory_enabled } = req.body;
 
   if (!assistant_id || !message) {
     res.status(400).json({ error: 'assistant_id 和 message 不能为空' });
@@ -106,23 +105,6 @@ router.post('/completions', async (req: Request, res: Response) => {
   // 注入用户个人信息（固定拼接，不走检索）
   systemContent += userProfileService.buildProfileSection();
 
-  // 注入知识库：前端显式传递时以前端为准（含空数组），否则使用助手配置
-  let kbIds: string[] = [];
-  if (Array.isArray(kb_ids)) {
-    kbIds = kb_ids;
-  } else {
-    try {
-      const parsed = JSON.parse(assistant.knowledge_base_ids || '[]');
-      // 防御双重 JSON 编码：解析结果仍为字符串则再解析一次
-      kbIds = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
-      if (!Array.isArray(kbIds)) kbIds = [];
-    } catch { kbIds = []; }
-  }
-
-  // 知识库检索结果（在注入系统提示词前声明，用于后续引用传递）
-  let kbResults: any[] = [];
-  const hasKb = kbIds.length > 0;
-
   // 记录请求入口时间，用于 TTFT 计算（含知识库检索耗时）
   const requestStartTime = Date.now();
 
@@ -161,22 +143,6 @@ router.post('/completions', async (req: Request, res: Response) => {
   res.on('close', handleDisconnect);
   req.on('aborted', handleDisconnect);
 
-  // 知识库检索
-  const tSearchStart = Date.now();
-  if (hasKb) {
-    sendSSE({ type: 'status', message: '正在检索知识库...' });
-
-    kbResults = await knowledgeService.search(
-      kbIds, message, undefined, undefined,
-      assistant.provider_id, assistant.model_id, true
-    );
-    console.log(`[Chat] 知识库检索完成 | 耗时 ${Date.now() - tSearchStart}ms | 结果 ${kbResults.length} 条`);
-    if (kbResults.length > 0) {
-      const kbContext = kbResults.map((r: any, i: number) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
-      systemContent += `\n\n## 相关知识库内容\n${kbContext}`;
-    }
-  }
-
   // 深度思考模式控制
   const thinkingMode = thinking_mode || 'default';
   const THINK_ENABLED_INSTRUCTION = '\n\n## 思考要求\n请在回答每个问题时，使用以下格式进行深度思考：\n<think>\n详细的分步推理过程...\n</think>\n\n最终答案。';
@@ -187,15 +153,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     systemContent += THINK_DISABLED_INSTRUCTION;
   }
 
-  // 发送对话 ID 和引用信息
-  const citations = kbResults.map((r: any) => ({
-    documentName: r.documentName,
-    score: r.score,
-    snippet: r.content.slice(0, 100),
-    metadata: r.metadata || null,
-  }));
-
-  sendSSE({ type: 'meta', conversation_id: activeConvId, citations });
+  sendSSE({ type: 'meta', conversation_id: activeConvId, citations: [] });
 
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
@@ -315,7 +273,7 @@ router.post('/completions', async (req: Request, res: Response) => {
           metrics?.completionTokens ?? null,
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
-          citations.length > 0 ? JSON.stringify(citations) : null,
+          null,
           (() => {
             // 过滤掉未完成的幽灵工具调用（status 仍为 running 且无实质参数/结果）
             const cleaned = toolCallEntries.filter(e => !(e.status === 'running' && !e.result))
@@ -329,14 +287,13 @@ router.post('/completions', async (req: Request, res: Response) => {
 
         // 发送完成事件（含计时明细用于调试）
         const totalMs = Date.now() - requestStartTime;
-        const kbSearchMs = tLlmStart - tSearchStart;
         sendSSE({
           type: 'done',
           message_id: aiMsgId,
           content: parsedContent,
           thoughtProcess,
           metrics: metrics || null,
-          timing: { totalMs, kbSearchMs, llmTtftMs: metrics?.ttftMs ?? null },
+          timing: { totalMs },
         });
 
         endResponse();
@@ -401,7 +358,7 @@ router.post('/completions', async (req: Request, res: Response) => {
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, effectiveMemoryEnabled ? 1 : 0, convPrivacyMode);
+    ).run(aiMsgId, activeConvId, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, null, toolCallEntries.length > 0 ? JSON.stringify(toolCallEntries) : null, turnIndex, effectiveMemoryEnabled ? 1 : 0, convPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }
@@ -410,7 +367,7 @@ router.post('/completions', async (req: Request, res: Response) => {
 
 // 重新生成 —— 删除指定助手消息后重新调用 LLM
 router.post('/regenerate', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message_id, thinking_mode, kb_ids, web_search_enabled, memory_enabled } = req.body;
+  const { assistant_id, conversation_id, message_id, thinking_mode, web_search_enabled, memory_enabled } = req.body;
 
   if (!assistant_id || !conversation_id || !message_id) {
     res.status(400).json({ error: 'assistant_id、conversation_id 和 message_id 不能为空' });
@@ -468,18 +425,6 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   let systemContent = assistant.system_prompt || '';
   systemContent += `\n\n今天的日期是 ${today2}。当用户要求搜索"最新"、"最近"、"今天"等内容时，请使用此日期作为参考。`;
   systemContent += userProfileService.buildProfileSection();
-  let kbIds: string[] = [];
-  if (Array.isArray(kb_ids)) {
-    kbIds = kb_ids;
-  } else {
-    try {
-      const parsed = JSON.parse(assistant.knowledge_base_ids || '[]');
-      kbIds = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
-      if (!Array.isArray(kbIds)) kbIds = [];
-    } catch { kbIds = []; }
-  }
-  let kbResults: any[] = [];
-  const hasKb = kbIds.length > 0;
 
   // 记录请求入口时间，用于 TTFT 计算（含知识库检索耗时）
   const requestStartTime = Date.now();
@@ -519,21 +464,6 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   res.on('close', handleDisconnect);
   req.on('aborted', handleDisconnect);
 
-  // 知识库检索
-  const tSearchStart = Date.now();
-  if (hasKb) {
-    sendSSE({ type: 'status', message: '正在检索知识库...' });
-    kbResults = await knowledgeService.search(
-      kbIds, lastUserMsg.content, undefined, undefined,
-      assistant.provider_id, assistant.model_id
-    );
-    console.log(`[Chat/Regen] 知识库检索完成 | 耗时 ${Date.now() - tSearchStart}ms | 结果 ${kbResults.length} 条`);
-    if (kbResults.length > 0) {
-      const kbContext = kbResults.map((r: any, i: number) => `${i + 1}. [来源: ${r.documentName}] ${r.content}`).join('\n\n');
-      systemContent += `\n\n## 相关知识库内容\n${kbContext}`;
-    }
-  }
-
   // 深度思考模式控制
   const regenThinkingMode = thinking_mode || 'default';
   if (regenThinkingMode === 'enabled') {
@@ -552,14 +482,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     }
   }
 
-  // 构建引用信息
-  const citations = kbResults.map((r: any) => ({
-    documentName: r.documentName,
-    score: r.score,
-    snippet: r.content.slice(0, 100),
-    metadata: r.metadata || null,
-  }));
-  sendSSE({ type: 'meta', conversation_id, citations });
+  sendSSE({ type: 'meta', conversation_id, citations: [] });
 
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
@@ -670,7 +593,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
           metrics?.completionTokens ?? null,
           metrics?.ttftMs ?? null,
           metrics?.tokensPerSecond ?? null,
-          citations.length > 0 ? JSON.stringify(citations) : null,
+          null,
           (() => {
             const cleaned = regenToolCallEntries.filter(e => !(e.status === 'running' && !e.result))
             return cleaned.length > 0 ? JSON.stringify(cleaned) : null
@@ -681,14 +604,13 @@ router.post('/regenerate', async (req: Request, res: Response) => {
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
 
         const totalMs = Date.now() - requestStartTime;
-        const kbSearchMs = tLlmStart - tSearchStart;
         sendSSE({
           type: 'done',
           message_id: aiMsgId,
           content: parsedContent,
           thoughtProcess,
           metrics: metrics || null,
-          timing: { totalMs, kbSearchMs, llmTtftMs: metrics?.ttftMs ?? null },
+          timing: { totalMs },
         });
 
         endResponse();
@@ -741,7 +663,7 @@ router.post('/regenerate', async (req: Request, res: Response) => {
     const aiMsgId = uuidv4();
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, raw_content, thought_process, model_name, provider_name, citations, tool_calls, turn_index, memory_enabled, privacy_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, citations.length > 0 ? JSON.stringify(citations) : null, (() => { const c = regenToolCallEntries.filter(e => !(e.status === 'running' && !e.result)); return c.length > 0 ? JSON.stringify(c) : null; })(), regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
+    ).run(aiMsgId, conversation_id, 'assistant', parsedContent, content, thoughtProcess, modelName, providerName || null, null, (() => { const c = regenToolCallEntries.filter(e => !(e.status === 'running' && !e.result)); return c.length > 0 ? JSON.stringify(c) : null; })(), regenTurnIndex, regenMemoryEnabled, regenPrivacyMode);
     db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(conversation_id);
     sendSSE({ type: 'done', message_id: aiMsgId, content: parsedContent, thoughtProcess, aborted: true });
   }

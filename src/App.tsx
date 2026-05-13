@@ -19,11 +19,9 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [isSettingsMode, setIsSettingsMode] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'model' | 'rag' | 'memory' | 'profile'>('model');
+  const [settingsTab, setSettingsTab] = useState<'model' | 'memory' | 'profile'>('model');
   const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
-  const [citationsByConv, setCitationsByConv] = useState<Record<string, any[]>>({});
-  const [kbSearchStatus, setKbSearchStatus] = useState<string | null>(null);
 
   // 会话级 UI 状态：深度思考 + 联网搜索（按会话缓存，切换重置）
   const [conversationUIState, setConversationUIState] = useState<Record<string, ConversationUIState>>({});
@@ -32,8 +30,6 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
 
-  // 知识库选择按助手维度缓存：切换会话时保持选中
-  const assistantKbCacheRef = useRef<Record<string, string[]>>({});
   // 消息按会话维度缓存：流式生成中切出再切回时保留流式状态
   const messagesCacheRef = useRef<Record<string, Message[]>>({});
   // 当前会话 ID 的同步 ref：供 SSE 异步回调判断用户是否已切走
@@ -41,8 +37,6 @@ export default function App() {
   currentConversationIdRef.current = currentConversationId;
   // 按会话维度保存 AbortController：切回后仍能停止后台 SSE
   const abortControllersRef = useRef<Record<string, AbortController>>({});
-  // 当前会话的 citations，从 citationsByConv 按 conversationId 派生
-  const citations = currentConversationId ? (citationsByConv[currentConversationId] || []) : [];
 
   // 当前助手
   const currentAssistant = assistants.find(a => a.id === currentAssistantId) || null;
@@ -110,15 +104,6 @@ export default function App() {
   const normalizeMessage = (msg: any): Message => {
     let normalized = { ...msg };
 
-    // 解析 citations JSON 字符串
-    if (typeof normalized.citations === 'string' && normalized.citations) {
-      try {
-        normalized.citations = JSON.parse(normalized.citations);
-      } catch {
-        normalized.citations = null;
-      }
-    }
-
     // 解析 tool_calls JSON 字符串
     if (typeof normalized.tool_calls === 'string' && normalized.tool_calls) {
       try {
@@ -156,11 +141,6 @@ export default function App() {
       const msgs = await messagesApi.list(conversationId);
       const normalized = msgs.map(normalizeMessage);
       setMessages(normalized);
-      // 从历史消息中恢复 citations（取最后一条助手消息的）
-      const lastAssistant = [...normalized].reverse().find((m: any) => m.role === 'assistant' && m.citations);
-      if (lastAssistant) {
-        setCitationsByConv(prev => ({ ...prev, [conversationId]: lastAssistant.citations }));
-      }
     } catch (e) { console.error(e); }
   };
 
@@ -330,7 +310,7 @@ export default function App() {
   };
 
   // ===== 发送消息 =====
-  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', kbIds: string[] = [], files?: import('./types').FileAttachment[]) => {
+  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', files?: import('./types').FileAttachment[]) => {
     if (!currentAssistantId) return;
 
     // 只阻止当前活跃会话在流式时发送消息
@@ -395,7 +375,7 @@ export default function App() {
     let reasoningSegments: any[] = [];
 
     const controller = chatSSE(currentAssistantId, content, activeConvId, thinkingMode, {
-      onMeta(convId, newCitations) {
+      onMeta(convId) {
         // 仅当用户仍在当前会话时才更新会话 ID（避免切走后 meta 事件切换回旧会话）
         if (convId !== activeConvId) {
           if (activeConvId === currentConversationIdRef.current) {
@@ -405,20 +385,6 @@ export default function App() {
             currentConversationIdRef.current = convId;
           }
         }
-        // citations 按会话存储到 state，无需守卫：属于其他会话的写入不影响当前 UI
-        if (newCitations !== undefined) {
-          setCitationsByConv(prev => ({ ...prev, [activeConvId]: newCitations }));
-          const cachedMsgs = messagesCacheRef.current[activeConvId];
-          if (cachedMsgs) {
-            messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-              m.role === 'assistant' ? { ...m, citations: newCitations } : m
-            );
-          }
-        }
-      },
-      onStatus(message: string) {
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setKbSearchStatus(message);
       },
       onToken(token) {
         fullRawContent += token;
@@ -463,7 +429,6 @@ export default function App() {
         ));
       },
       onDone(messageId, content, thoughtProcess, metrics, aborted) {
-        setKbSearchStatus(null);
 
         // 刷新剩余推理缓冲为最后一个 reasoning 段
         if (currentReasoning) {
@@ -565,7 +530,6 @@ export default function App() {
         }
       },
       onError(error) {
-        setKbSearchStatus(null);
 
         const finalizeError = (prev: Message[]) => prev.map(m =>
           m.id === aiMsg.id
@@ -589,20 +553,17 @@ export default function App() {
           }
         }
       },
-    }, kbIds, files, { webSearchEnabled: currentUIState.webSearchEnabled });
+    }, files, { webSearchEnabled: currentUIState.webSearchEnabled });
     abortControllersRef.current[activeConvId] = controller;
     setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
 
   // ===== 重新生成 =====
-  const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default', kbIds: string[] = []) => {
+  const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default') => {
     if (!currentAssistantId || !currentConversationId) return;
     if (isStreaming && streamingConversationId === currentConversationId) return;
 
     const activeConvId = currentConversationId;
-
-    // 清除旧引用，等待新 meta 事件更新
-    setCitationsByConv(prev => ({ ...prev, [activeConvId]: [] }));
 
     // 立即隐藏旧消息并显示 loading，不等服务端响应
     setMessages(prev => prev.map(m =>
@@ -666,21 +627,7 @@ export default function App() {
     let reasoningSegments: any[] = [];
 
     const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, {
-      onMeta(_convId, newCitations) {
-        // citations 按会话存储，无需守卫：属于其他会话的写入不影响当前 UI
-        if (newCitations !== undefined) {
-          setCitationsByConv(prev => ({ ...prev, [activeConvId]: newCitations }));
-          const cachedMsgs = messagesCacheRef.current[activeConvId];
-          if (cachedMsgs) {
-            messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-              m.role === 'assistant' ? { ...m, citations: newCitations } : m
-            );
-          }
-        }
-      },
-      onStatus(message: string) {
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setKbSearchStatus(message);
+      onMeta(_convId) {
       },
       onToken(token) {
         fullRawContent += token;
@@ -722,7 +669,6 @@ export default function App() {
         ));
       },
       onDone(newMsgId, content, thoughtProcess, metrics, aborted) {
-        setKbSearchStatus(null);
 
         if (currentReasoning) {
           reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
@@ -812,7 +758,6 @@ export default function App() {
         }
       },
       onError(error) {
-        setKbSearchStatus(null);
 
         const finalizeError = (prev: Message[]) => prev.map(m =>
           m.id === effectiveMessageId
@@ -836,7 +781,7 @@ export default function App() {
           }
         }
       },
-    }, kbIds, { webSearchEnabled: currentUIState.webSearchEnabled });
+    }, { webSearchEnabled: currentUIState.webSearchEnabled });
     abortControllersRef.current[activeConvId] = regenController;
     setAbortController(regenController);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages]);
@@ -906,9 +851,6 @@ export default function App() {
             onRegenerate={handleRegenerate}
             providers={providers}
             models={models}
-            citations={citations}
-            kbSearchStatus={kbSearchStatus}
-            assistantKbCacheRef={assistantKbCacheRef}
             conversationId={currentConversationId}
             conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
             deepThinkingMode={currentUIState.deepThinkingMode}

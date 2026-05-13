@@ -78,29 +78,6 @@ export const profileApi = {
   remove: (key: string) => request<any>(`/profile/${key}`, { method: 'DELETE' }),
 };
 
-// ===== 知识库 API =====
-export const knowledgeApi = {
-  list: () => request<any[]>('/knowledge'),
-  create: (data: any) => request<any>('/knowledge', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: string, data: any) => request<any>(`/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  remove: (id: string) => request<any>(`/knowledge/${id}`, { method: 'DELETE' }),
-  getDocuments: (kbId: string) => request<any[]>(`/knowledge/${kbId}/documents`),
-  uploadDocument: (kbId: string, file: File) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    return fetch(`${BASE_URL}/knowledge/${kbId}/documents`, { method: 'POST', body: formData }).then(async (r) => {
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || '上传失败');
-      return data;
-    });
-  },
-  deleteDocument: (kbId: string, docId: string) =>
-    request<any>(`/knowledge/${kbId}/documents/${docId}`, { method: 'DELETE' }),
-  getChunks: (kbId: string, docId: string) => request<any[]>(`/knowledge/${kbId}/documents/${docId}/chunks`),
-  search: (kbId: string, query: string, topK?: number, threshold?: number) =>
-    request<any[]>(`/knowledge/${kbId}/search`, { method: 'POST', body: JSON.stringify({ query, topK, threshold }) }),
-};
-
 // ===== 聊天文件上传 API =====
 // ===== 全局设置 API =====
 export const settingsApi = {
@@ -139,7 +116,6 @@ export function chatSSE(
     onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
     onStepStart?: (step: number) => void;
   },
-  kbIds?: string[],
   files?: import('../types').FileAttachment[],
   options?: { webSearchEnabled?: boolean; memoryEnabled?: boolean },
 ): AbortController {
@@ -154,7 +130,6 @@ export function chatSSE(
       message,
       thinking_mode: thinkingMode,
       files: files,
-      kb_ids: kbIds,
       web_search_enabled: options?.webSearchEnabled,
       memory_enabled: options?.memoryEnabled,
     }),
@@ -250,7 +225,6 @@ export function regenerateSSE(
     onToolResult?: (toolCallId: string, toolName: string, result: any) => void;
     onStepStart?: (step: number) => void;
   },
-  kbIds?: string[],
   options?: { webSearchEnabled?: boolean; memoryEnabled?: boolean },
 ): AbortController {
   const controller = new AbortController();
@@ -263,7 +237,6 @@ export function regenerateSSE(
       conversation_id: conversationId,
       message_id: messageId,
       thinking_mode: thinkingMode,
-      kb_ids: kbIds,
       web_search_enabled: options?.webSearchEnabled,
       memory_enabled: options?.memoryEnabled,
     }),
