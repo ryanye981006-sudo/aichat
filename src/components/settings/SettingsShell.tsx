@@ -11,10 +11,10 @@ interface SettingsShellProps {
   children: ReactNode;
 }
 
-const NAV_ITEMS: { key: SettingsTab; label: string; icon: string }[] = [
-  { key: 'model', label: '模型设置', icon: '⚙' },
-  { key: 'memory', label: '长期记忆', icon: '🧠' },
-  { key: 'tools', label: '工具设置', icon: '🔧' },
+const NAV_ITEMS: { key: SettingsTab; label: string }[] = [
+  { key: 'model', label: '模型设置' },
+  { key: 'memory', label: '长期记忆' },
+  { key: 'tools', label: '工具设置' },
 ];
 
 export default function SettingsShell({ activeTab, onTabChange, onClose, children }: SettingsShellProps) {
@@ -50,7 +50,6 @@ export default function SettingsShell({ activeTab, onTabChange, onClose, childre
                 color: activeTab === item.key ? 'var(--accent)' : 'var(--muted)',
               }}
             >
-              <span style={{ fontSize: 16 }}>{item.icon}</span>
               {item.label}
             </button>
           ))}

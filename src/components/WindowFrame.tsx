@@ -161,7 +161,7 @@ export default function WindowFrame({ showWindowFrame, onToggleWindowed, isWindo
         </div>
 
         {/* 内容区 */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', position: 'relative' }}>
           {children}
         </div>
 
