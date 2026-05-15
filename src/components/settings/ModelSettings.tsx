@@ -186,7 +186,8 @@ export default function ModelSettings() {
 
       {/* ===== 上半部：供应商选择区 ===== */}
       <div className="shrink-0" style={{ padding: '20px 24px 18px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+        <div className="setting-group-label" style={{ marginBottom: 10 }}>供应商</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
           <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 w-3.5 h-3.5" style={{ color: 'var(--muted)' }} />
             <input
@@ -212,7 +213,6 @@ export default function ModelSettings() {
             <Plus className="w-3.5 h-3.5" /> 添加供应商
           </button>
         </div>
-        <div className="setting-group-label" style={{ marginBottom: 10 }}>供应商</div>
 
         {providers.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--muted-soft)', letterSpacing: '0.01em', padding: '14px 0' }}>
