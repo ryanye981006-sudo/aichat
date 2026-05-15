@@ -36,8 +36,8 @@ export default function SettingsShell({ activeTab, onTabChange, onClose, childre
       >
         <div className="flex-1 overflow-y-auto" style={{ padding: '20px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div
-            className="px-3 pb-4 text-xs font-semibold uppercase"
-            style={{ color: 'var(--muted)', letterSpacing: '0.08em' }}
+            className="px-3 pb-4 font-semibold uppercase"
+            style={{ fontSize: 10, fontFamily: 'var(--font-body)', color: 'var(--muted)', letterSpacing: '0.08em' }}
           >
             系统设置
           </div>

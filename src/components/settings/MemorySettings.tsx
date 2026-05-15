@@ -75,7 +75,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
         <div className="flex items-center justify-between">
           <div>
             <h3 className="uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 4 }}>全局记忆</h3>
-            <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+            <p className="mt-0.5" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
               {settings?.enabled ? '已开启 — 系统会自动从对话中提取记忆' : '已关闭 — 不会自动提取新记忆'}
             </p>
           </div>
@@ -110,7 +110,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
       <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
         <div>
           <h3 className="uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 4 }}>个人简介</h3>
-          <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
+          <p className="mt-0.5" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
             每行一个条目，格式为 "键: 值"。AI 在对话时会参考这些信息
           </p>
         </div>
@@ -119,12 +119,12 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
           onChange={e => setProfileText(e.target.value)}
           rows={8}
           placeholder={"昵称: 小明\n位置: 北京\n职业: 软件工程师\n技术栈: React, TypeScript, Python\n爱好: 骑行, 摄影"}
-          className="w-full px-4 py-3 rounded-lg border text-sm outline-none resize-y leading-relaxed"
+          className="w-full px-4 py-3 rounded-lg border outline-none resize-y leading-relaxed"
           style={{
             backgroundColor: 'var(--chat-bg)',
             borderColor: 'var(--border)',
             color: 'var(--fg)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-body)',
             fontSize: 13,
           }}
           onFocus={e => {
@@ -138,7 +138,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
         />
         <div className="flex items-center gap-3">
           <BtnPrimary onClick={handleSaveProfile}>保存个人简介</BtnPrimary>
-          {profileSaved && <span className="text-xs" style={{ color: 'var(--success)' }}>已保存</span>}
+          {profileSaved && <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)' }}>已保存</span>}
         </div>
       </div>
 
@@ -169,7 +169,7 @@ function PageTitle({ icon, title, desc }: { icon: string; title: string; desc: s
         <span>{icon}</span>
         {title}
       </h2>
-      <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{desc}</p>
+      <p className="mt-1" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>{desc}</p>
     </div>
   );
 }
@@ -223,14 +223,14 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
           <div>
             <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>LLM 模型（记忆提取）</label>
             <select value={llmProviderId} onChange={e => { setLlmProviderId(e.target.value); setLlmModelId(''); }}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none mb-2"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
+              className="w-full px-3 py-2.5 rounded-lg border outline-none mb-2"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}>
               <option value="">选择提供商</option>
               {enabledProviders.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <select value={llmModelId} onChange={e => setLlmModelId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
+              className="w-full px-3 py-2.5 rounded-lg border outline-none"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}>
               <option value="">选择模型</option>
               {llmModels.map(m => <option key={m.id} value={m.id}>{m.display_name || m.name}</option>)}
             </select>
@@ -240,14 +240,14 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
           <div>
             <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>嵌入模型</label>
             <select value={embProviderId} onChange={e => { setEmbProviderId(e.target.value); setEmbModelId(''); }}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none mb-2"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
+              className="w-full px-3 py-2.5 rounded-lg border outline-none mb-2"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}>
               <option value="">选择提供商</option>
               {enabledProviders.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <select value={embModelId} onChange={e => setEmbModelId(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
+              className="w-full px-3 py-2.5 rounded-lg border outline-none"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}>
               <option value="">选择模型</option>
               {embModels.map(m => <option key={m.id} value={m.id}>{m.display_name || m.name}</option>)}
             </select>
@@ -257,8 +257,8 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
           <div>
             <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>嵌入维度</label>
             <input type="number" value={embDim} onChange={e => setEmbDim(parseInt(e.target.value) || 1536)}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }} />
+              className="w-full px-3 py-2.5 rounded-lg border outline-none"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }} />
           </div>
         </div>
 

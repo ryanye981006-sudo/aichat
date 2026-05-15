@@ -191,8 +191,8 @@ export default function ModelSettings() {
             <Search className="absolute left-3 top-2.5 w-3.5 h-3.5" style={{ color: 'var(--muted)' }} />
             <input
               placeholder="搜索供应商..."
-              className="w-full pl-9 pr-3 py-2 bg-transparent rounded-lg text-sm outline-none"
-              style={{ color: 'var(--fg)' }}
+              className="w-full pl-9 pr-3 py-2 bg-transparent rounded-lg outline-none"
+              style={{ color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}
               value={providerSearch}
               onChange={e => setProviderSearch(e.target.value)}
             />
@@ -307,8 +307,8 @@ export default function ModelSettings() {
                       type={showKey ? 'text' : 'password'}
                       value={selectedProvider.api_key}
                       onChange={e => handleUpdateProvider(selectedProvider.id, { api_key: e.target.value })}
-                      className="w-full px-4 py-2.5 border-none outline-none bg-transparent text-sm"
-                      style={{ color: 'var(--fg)' }}
+                      className="w-full px-4 py-2.5 border-none outline-none bg-transparent"
+                      style={{ color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}
                       placeholder="sk-..."
                     />
                     <button type="button" onClick={() => setShowKey(!showKey)} className="absolute right-3 top-2.5" style={{ color: 'var(--muted)' }}>
@@ -316,8 +316,8 @@ export default function ModelSettings() {
                     </button>
                   </div>
                   <button type="button" onClick={handleOpenSingleTest}
-                    className="px-4 border-l text-sm font-medium transition-colors"
-                    style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
+                    className="px-4 border-l font-medium transition-colors"
+                    style={{ borderColor: 'var(--border)', color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-body)' }}
                     onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
                     onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
                     测试
@@ -330,8 +330,8 @@ export default function ModelSettings() {
                 <input
                   value={selectedProvider.base_url}
                   onChange={e => handleUpdateProvider(selectedProvider.id, { base_url: e.target.value })}
-                  className="w-full px-4 py-2.5 rounded-lg border outline-none text-sm"
-                  style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+                  className="w-full px-4 py-2.5 rounded-lg border outline-none"
+                  style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}
                   placeholder="https://api.openai.com/v1"
                   onFocus={e => {
                     (e.target as HTMLElement).style.borderColor = 'var(--accent)';
@@ -343,7 +343,7 @@ export default function ModelSettings() {
                   }}
                 />
                 {selectedProvider.base_url && (
-                  <p className="text-xs mt-1.5" style={{ color: 'var(--muted)' }}>
+                  <p className="mt-1.5" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
                     聊天地址: <span style={{ color: 'var(--accent)' }}>{normalizeBaseUrl(selectedProvider.base_url)}/chat/completions</span>
                   </p>
                 )}
@@ -369,8 +369,8 @@ export default function ModelSettings() {
                 <div className="flex items-center gap-2 mb-3">
                   <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
                     <button onClick={handleFetchModels} disabled={fetching}
-                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors"
-                      style={{ color: 'var(--fg)' }}
+                      className="flex items-center gap-1 px-3 py-1.5 font-medium transition-colors"
+                      style={{ color: 'var(--fg)', fontSize: 11, fontFamily: 'var(--font-body)' }}
                       onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
                       onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
                       <RefreshCw className={cn("w-3.5 h-3.5", fetching && "animate-spin")} />
@@ -378,15 +378,15 @@ export default function ModelSettings() {
                     </button>
                     <div className="w-px" style={{ backgroundColor: 'var(--border)' }} />
                     <button onClick={() => setShowAddModel(true)}
-                      className="px-3 py-1.5 text-xs font-medium transition-colors"
-                      style={{ color: 'var(--accent)' }}
+                      className="px-3 py-1.5 font-medium transition-colors"
+                      style={{ color: 'var(--accent)', fontSize: 11, fontFamily: 'var(--font-body)' }}
                       onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent-dim)'}
                       onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
-                {fetchError && <p className="text-xs mb-3" style={{ color: 'var(--danger)' }}>{fetchError}</p>}
+                {fetchError && <p className="mb-3" style={{ fontSize: 11, color: 'var(--danger)' }}>{fetchError}</p>}
 
                 <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
                   {providerModels.map(m => {
@@ -396,7 +396,7 @@ export default function ModelSettings() {
                         style={{ borderColor: 'var(--border)' }}>
                         <div className="flex items-center gap-3">
                           <Box className="w-4 h-4" style={{ color: 'var(--muted)' }} />
-                          <span className="text-sm font-medium" style={{ color: 'var(--fg)' }}>{m.display_name || m.name}</span>
+                          <span className="font-medium" style={{ color: 'var(--fg)', fontSize: 13, letterSpacing: '-0.01em' }}>{m.display_name || m.name}</span>
                         </div>
                         <div className="flex items-center gap-2">
                           {testingModels && !test && <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: 'var(--muted)' }} />}
@@ -533,19 +533,19 @@ function AddProviderModal({ onClose, onSave }: { onClose: () => void; onSave: (n
         </div>
         <div className="space-y-4" style={{ padding: 22 }}>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>名称</label>
+            <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>名称</label>
             <input value={name} onChange={e => setName(e.target.value)} autoFocus
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+              className="w-full px-3 py-2.5 rounded-lg border outline-none"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}
               placeholder="例如 通义千问"
               onFocus={e => { (e.target as HTMLElement).style.borderColor = 'var(--accent)'; (e.target as HTMLElement).style.boxShadow = '0 0 0 3px rgba(85,112,184,0.06)'; }}
               onBlur={e => { (e.target as HTMLElement).style.borderColor = 'var(--border)'; (e.target as HTMLElement).style.boxShadow = 'none'; }} />
           </div>
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>类型</label>
+            <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>类型</label>
             <select value={type} onChange={e => setType(e.target.value)}
-              className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
+              className="w-full px-3 py-2.5 rounded-lg border outline-none"
+              style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}>
               <option value="OpenAI">OpenAI</option>
               <option value="Ollama">Ollama</option>
               <option value="Custom">自定义</option>
@@ -598,10 +598,10 @@ function AddModelModal({ onClose, onSave, onValidate }: {
           </button>
         </div>
         <div style={{ padding: 22 }}>
-          <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>模型标识 (Model ID)</label>
+          <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>模型标识 (Model ID)</label>
           <input value={name} onChange={e => { setName(e.target.value); setError(''); }} autoFocus
-            className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-            style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+            className="w-full px-3 py-2.5 rounded-lg border outline-none"
+            style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}
             placeholder="例如 gpt-4o"
             onKeyDown={e => { if (e.key === 'Enter') handleConfirm(); }}
             onFocus={e => { (e.target as HTMLElement).style.borderColor = 'var(--accent)'; (e.target as HTMLElement).style.boxShadow = '0 0 0 3px rgba(85,112,184,0.06)'; }}
@@ -691,8 +691,8 @@ function FetchModelsModal({
             <div className="relative flex-1">
               <Search className="absolute left-3 top-2.5 w-4 h-4" style={{ color: 'var(--muted)' }} />
               <input placeholder="搜索模型 ID 或名称"
-                className="w-full pl-10 pr-3 py-2 rounded-lg border text-sm outline-none"
-                style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}
+                className="w-full pl-10 pr-3 py-2 rounded-lg border outline-none"
+                style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}
                 value={searchText} onChange={e => setSearchText(e.target.value)} />
             </div>
             <div className="flex items-center gap-1">
@@ -814,10 +814,10 @@ function SingleTestModal({ providerModels, singleTestModelId, singleTesting, sin
           {providerModels.length > 0 ? (
             <>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>选择模型</label>
+                <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>选择模型</label>
                 <select value={singleTestModelId} onChange={e => onChangeModel(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-                  style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
+                  className="w-full px-3 py-2.5 rounded-lg border outline-none"
+                  style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 13, fontFamily: 'var(--font-body)' }}>
                   {providerModels.map(m => <option key={m.id} value={m.id}>{m.display_name || m.name}</option>)}
                 </select>
               </div>

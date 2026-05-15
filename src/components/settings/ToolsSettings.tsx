@@ -114,7 +114,7 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
 
       {/* 记忆提取 LLM */}
       <Section title="记忆提取 LLM 模型">
-        <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
           选择用于从对话中提取长期记忆的大语言模型
         </p>
         <div className="grid grid-cols-2 gap-4">
@@ -137,7 +137,7 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
 
       {/* 嵌入模型 */}
       <Section title="嵌入模型配置">
-        <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
           用于向量化记忆和对话内容的嵌入模型
         </p>
         <div className="space-y-4">
@@ -150,14 +150,14 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
           <InputRow label="模型名称" value={embModelName} onChange={setEmbModelName} placeholder="text-embedding-3-small" />
           <div className="flex items-center gap-3">
             <BtnPrimary onClick={handleSaveEmbedding}>保存嵌入配置</BtnPrimary>
-            {embSaved && <span className="text-xs" style={{ color: 'var(--success)' }}>已保存</span>}
+            {embSaved && <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)' }}>已保存</span>}
           </div>
         </div>
       </Section>
 
       {/* 重排序模型 */}
       <Section title="重排序模型配置">
-        <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
           用于对检索结果进行语义重排序的模型
         </p>
         <div className="space-y-4">
@@ -170,14 +170,14 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
           <InputRow label="模型名称" value={rerankModelName} onChange={setRerankModelName} placeholder="bge-reranker-v2-m3" />
           <div className="flex items-center gap-3">
             <BtnPrimary onClick={handleSaveReranker}>保存重排序配置</BtnPrimary>
-            {rerankSaved && <span className="text-xs" style={{ color: 'var(--success)' }}>已保存</span>}
+            {rerankSaved && <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)' }}>已保存</span>}
           </div>
         </div>
       </Section>
 
       {/* 联网搜索 Key */}
       <Section title="联网搜索 Key">
-        <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
           阿里云 IQS API Key，用于联网搜索功能
         </p>
         {iqsConfigured ? (
@@ -228,7 +228,7 @@ function PageTitle({ icon, title, desc }: { icon: string; title: string; desc: s
         <span>{icon}</span>
         {title}
       </h2>
-      <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>{desc}</p>
+      <p className="mt-1" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>{desc}</p>
     </div>
   );
 }
@@ -251,11 +251,13 @@ function SelectField({ label, value, onChange, options, placeholder }: {
     <div>
       <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>{label}</label>
       <select value={value} onChange={onChange}
-        className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none appearance-none"
+        className="w-full px-3 py-2.5 rounded-lg border outline-none appearance-none"
         style={{
           backgroundColor: 'var(--surface)',
           borderColor: 'var(--border)',
           color: 'var(--fg)',
+          fontSize: 13,
+          fontFamily: 'var(--font-body)',
         }}
         onFocus={e => {
           (e.target as HTMLElement).style.borderColor = 'var(--accent)';
@@ -285,11 +287,13 @@ function InputRow({ label, value, onChange, placeholder, type, children }: {
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full pl-3 pr-10 py-2.5 rounded-lg border text-sm outline-none"
+          className="w-full pl-3 pr-10 py-2.5 rounded-lg border outline-none"
           style={{
             backgroundColor: 'var(--surface)',
             borderColor: 'var(--border)',
             color: 'var(--fg)',
+            fontSize: 13,
+            fontFamily: 'var(--font-body)',
           }}
           onFocus={e => {
             (e.target as HTMLElement).style.borderColor = 'var(--accent)';
