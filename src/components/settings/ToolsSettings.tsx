@@ -1,9 +1,9 @@
 // 工具设置：记忆提取 LLM + 嵌入模型 + 重排序模型 + 联网搜索 Key
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model } from '../../types';
-import { toolsApi, settingsApi } from '../../services/api';
-import { Toggle, BtnPrimary, BtnSecondary } from '../shared/Primitives';
-import { Eye, EyeOff } from 'lucide-react';
+import { toolsApi, memoryApi, settingsApi } from '../../services/api';
+import { Toggle, BtnPrimary } from '../shared/Primitives';
+import { ChevronDown, Eye, EyeOff, Search, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 interface ToolsSettingsProps {
   providers: Provider[];
@@ -11,210 +11,228 @@ interface ToolsSettingsProps {
 }
 
 export default function ToolsSettings({ providers, models }: ToolsSettingsProps) {
-  // 记忆 LLM
-  const [memLlmProviderId, setMemLlmProviderId] = useState('');
+  // 记忆提取 LLM
   const [memLlmModelId, setMemLlmModelId] = useState('');
+  const [memLlmSaved, setMemLlmSaved] = useState(false);
 
   // 嵌入模型
-  const [embApiUrl, setEmbApiUrl] = useState('');
-  const [embApiKey, setEmbApiKey] = useState('');
-  const [embApiKeyMasked, setEmbApiKeyMasked] = useState('');
   const [embModelName, setEmbModelName] = useState('');
   const [embSaved, setEmbSaved] = useState(false);
-  const [showEmbKey, setShowEmbKey] = useState(false);
 
   // 重排序模型
-  const [rerankApiUrl, setRerankApiUrl] = useState('');
-  const [rerankApiKey, setRerankApiKey] = useState('');
-  const [rerankApiKeyMasked, setRerankApiKeyMasked] = useState('');
   const [rerankModelName, setRerankModelName] = useState('');
   const [rerankSaved, setRerankSaved] = useState(false);
-  const [showRerankKey, setShowRerankKey] = useState(false);
 
   // IQS Key
+  const [iqsKeyInput, setIqsKeyInput] = useState('');
   const [iqsConfigured, setIqsConfigured] = useState(false);
   const [iqsKeyMasked, setIqsKeyMasked] = useState('');
-  const [iqsKeyInput, setIqsKeyInput] = useState('');
-  const [iqsSaving, setIqsSaving] = useState(false);
+  const [showIqsKey, setShowIqsKey] = useState(false);
+  const [iqsTesting, setIqsTesting] = useState(false);
+  const [iqsTestResult, setIqsTestResult] = useState<{ success: boolean; time: number; error?: string } | null>(null);
 
-  const enabledProviders = providers.filter(p => p.enabled);
-  const memLlmModels = models.filter(m => m.provider_id === memLlmProviderId);
+  const enabledModels = models.filter(m => {
+    const p = providers.find(p => p.id === m.provider_id);
+    return p?.enabled;
+  });
 
-  useEffect(() => {
-    loadConfigs();
-  }, []);
+  useEffect(() => { loadConfigs(); }, []);
 
   const loadConfigs = async () => {
     try {
-      const [emb, rerank, iqs] = await Promise.all([
+      const [mem, emb, rerank, iqs] = await Promise.all([
+        memoryApi.getSettings(),
         toolsApi.getEmbeddingConfig(),
         toolsApi.getRerankerConfig(),
         settingsApi.getIqsKey(),
       ]);
-      setEmbApiUrl(emb.apiUrl || '');
-      setEmbApiKey(emb.apiKey || '');
-      setEmbApiKeyMasked(emb.apiKeyMasked || '');
-      setEmbModelName(emb.modelName || '');
-      setRerankApiUrl(rerank.apiUrl || '');
-      setRerankApiKey(rerank.apiKey || '');
-      setRerankApiKeyMasked(rerank.apiKeyMasked || '');
-      setRerankModelName(rerank.modelName || '');
+      if (mem?.llm_model_id) setMemLlmModelId(mem.llm_model_id);
+      if (emb?.modelName) setEmbModelName(emb.modelName);
+      if (rerank?.modelName) setRerankModelName(rerank.modelName);
       setIqsConfigured(iqs.configured);
       setIqsKeyMasked(iqs.masked || '');
     } catch (e) { console.error('加载工具配置失败:', e); }
   };
 
-  const handleSaveEmbedding = async () => {
+  // 记忆 LLM 模型选择 → 自动保存
+  const handleMemLlmChange = async (modelId: string) => {
+    setMemLlmModelId(modelId);
+    const model = models.find(m => m.id === modelId);
+    if (!model) return;
     try {
-      await toolsApi.updateEmbeddingConfig({ apiUrl: embApiUrl, apiKey: embApiKey, modelName: embModelName });
-      await loadConfigs();
+      await memoryApi.updateSettings({ llm_provider_id: model.provider_id, llm_model_id: model.id });
+      setMemLlmSaved(true);
+      setTimeout(() => setMemLlmSaved(false), 2000);
+    } catch (e) { console.error(e); }
+  };
+
+  // 嵌入模型选择 → 自动保存
+  const handleEmbModelChange = async (modelName: string) => {
+    setEmbModelName(modelName);
+    try {
+      await toolsApi.updateEmbeddingConfig({ apiUrl: '', apiKey: '', modelName });
       setEmbSaved(true);
       setTimeout(() => setEmbSaved(false), 2000);
     } catch (e) { console.error(e); }
   };
 
-  const handleSaveReranker = async () => {
+  // 重排序模型选择 → 自动保存
+  const handleRerankModelChange = async (modelName: string) => {
+    setRerankModelName(modelName);
     try {
-      await toolsApi.updateRerankerConfig({ apiUrl: rerankApiUrl, apiKey: rerankApiKey, modelName: rerankModelName });
-      await loadConfigs();
+      await toolsApi.updateRerankerConfig({ apiUrl: '', apiKey: '', modelName });
       setRerankSaved(true);
       setTimeout(() => setRerankSaved(false), 2000);
     } catch (e) { console.error(e); }
   };
 
-  const handleSaveIqsKey = async () => {
-    if (!iqsKeyInput.trim()) return;
-    setIqsSaving(true);
+  // IQS Key 即时保存
+  const saveIqsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleIqsKeyChange = (val: string) => {
+    setIqsKeyInput(val);
+    if (saveIqsTimer.current) clearTimeout(saveIqsTimer.current);
+    saveIqsTimer.current = setTimeout(async () => {
+      if (!val.trim()) return;
+      try {
+        await settingsApi.updateIqsKey(val.trim());
+        await loadConfigs();
+        setIqsKeyInput('');
+        setIqsTestResult(null);
+      } catch (e: any) { /* ignore */ }
+    }, 600);
+  };
+
+  // IQS Key 测试
+  const handleTestIqsKey = async () => {
+    const keyToTest = iqsKeyInput.trim() || iqsKeyMasked;
+    if (!keyToTest) return;
+    setIqsTesting(true);
+    setIqsTestResult(null);
     try {
-      await settingsApi.updateIqsKey(iqsKeyInput.trim());
-      await loadConfigs();
-      setIqsKeyInput('');
-    } catch (e: any) {
-      alert(e.message || '保存失败');
+      const result = await settingsApi.testIqsKey(keyToTest);
+      setIqsTestResult(result);
+    } catch (e) {
+      setIqsTestResult({ success: false, time: 0, error: e instanceof Error ? e.message : '测试失败' });
     } finally {
-      setIqsSaving(false);
+      setIqsTesting(false);
     }
   };
 
-  const handleRemoveIqsKey = async () => {
-    setIqsSaving(true);
-    try {
-      await settingsApi.updateIqsKey('');
-      await loadConfigs();
-    } catch (e: any) {
-      alert(e.message || '移除失败');
-    } finally {
-      setIqsSaving(false);
-    }
-  };
+  // 匹配当前选中的模型对象
+  const memLlmModel = models.find(m => m.id === memLlmModelId);
+  const embModel = models.find(m => m.name === embModelName);
+  const rerankModel = models.find(m => m.name === rerankModelName);
 
   return (
     <div className="w-full py-8 px-6 space-y-10">
       <PageTitle title="工具设置" desc="配置记忆提取、向量检索与联网搜索所需的模型与密钥" />
 
-      {/* 记忆提取 LLM */}
-      <Section title="记忆提取 LLM 模型">
-        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
-          选择用于从对话中提取长期记忆的大语言模型
-        </p>
-        <div className="grid grid-cols-2 gap-4">
-          <SelectField
-            label="提供商"
-            value={memLlmProviderId}
-            onChange={e => { setMemLlmProviderId(e.target.value); setMemLlmModelId(''); }}
-            options={enabledProviders.map(p => ({ value: p.id, label: p.name }))}
-            placeholder="选择提供商"
-          />
-          <SelectField
-            label="模型"
-            value={memLlmModelId}
-            onChange={e => setMemLlmModelId(e.target.value)}
-            options={memLlmModels.map(m => ({ value: m.id, label: m.display_name || m.name }))}
-            placeholder="选择模型"
-          />
-        </div>
-      </Section>
+      {/* 记忆提取 LLM 模型 */}
+      <SettingBlock label="记忆提取 LLM 模型" desc="选择用于从对话中提取长期记忆的大语言模型" saved={memLlmSaved}>
+        <ModelSelect
+          models={enabledModels}
+          providers={providers}
+          selectedModelId={memLlmModelId}
+          selectedModelName={memLlmModel?.display_name || memLlmModel?.name}
+          onChange={handleMemLlmChange}
+          placeholder="选择模型"
+          selectBy="id"
+        />
+      </SettingBlock>
 
       {/* 嵌入模型 */}
-      <Section title="嵌入模型配置">
-        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
-          用于向量化记忆和对话内容的嵌入模型
-        </p>
-        <div className="space-y-4">
-          <InputRow label="API 地址" value={embApiUrl} onChange={setEmbApiUrl} placeholder="https://api.openai.com/v1" />
-          <InputRow label="API Key" type={showEmbKey ? 'text' : 'password'} value={embApiKey} onChange={setEmbApiKey} placeholder="sk-...">
-            <button type="button" onClick={() => setShowEmbKey(!showEmbKey)} className="absolute right-3 top-2.5" style={{ color: 'var(--muted)' }}>
-              {showEmbKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </InputRow>
-          <InputRow label="模型名称" value={embModelName} onChange={setEmbModelName} placeholder="text-embedding-3-small" />
-          <div className="flex items-center gap-3">
-            <BtnPrimary onClick={handleSaveEmbedding}>保存嵌入配置</BtnPrimary>
-            {embSaved && <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)' }}>已保存</span>}
-          </div>
-        </div>
-      </Section>
+      <SettingBlock label="嵌入模型配置" desc="用于向量化记忆和对话内容的嵌入模型" saved={embSaved}>
+        <ModelSelect
+          models={enabledModels}
+          providers={providers}
+          selectedModelId={embModel?.id || ''}
+          selectedModelName={embModel?.display_name || embModel?.name}
+          onChange={(modelId) => {
+            const m = models.find(x => x.id === modelId);
+            if (m) handleEmbModelChange(m.name);
+          }}
+          placeholder="选择模型"
+          selectBy="id"
+        />
+      </SettingBlock>
 
       {/* 重排序模型 */}
-      <Section title="重排序模型配置">
-        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
-          用于对检索结果进行语义重排序的模型
-        </p>
-        <div className="space-y-4">
-          <InputRow label="API 地址" value={rerankApiUrl} onChange={setRerankApiUrl} placeholder="https://api.openai.com/v1" />
-          <InputRow label="API Key" type={showRerankKey ? 'text' : 'password'} value={rerankApiKey} onChange={setRerankApiKey} placeholder="sk-...">
-            <button type="button" onClick={() => setShowRerankKey(!showRerankKey)} className="absolute right-3 top-2.5" style={{ color: 'var(--muted)' }}>
-              {showRerankKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-            </button>
-          </InputRow>
-          <InputRow label="模型名称" value={rerankModelName} onChange={setRerankModelName} placeholder="bge-reranker-v2-m3" />
-          <div className="flex items-center gap-3">
-            <BtnPrimary onClick={handleSaveReranker}>保存重排序配置</BtnPrimary>
-            {rerankSaved && <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)' }}>已保存</span>}
-          </div>
-        </div>
-      </Section>
+      <SettingBlock label="重排序模型配置" desc="用于对检索结果进行语义重排序的模型" saved={rerankSaved}>
+        <ModelSelect
+          models={enabledModels}
+          providers={providers}
+          selectedModelId={rerankModel?.id || ''}
+          selectedModelName={rerankModel?.display_name || rerankModel?.name}
+          onChange={(modelId) => {
+            const m = models.find(x => x.id === modelId);
+            if (m) handleRerankModelChange(m.name);
+          }}
+          placeholder="选择模型"
+          selectBy="id"
+        />
+      </SettingBlock>
 
       {/* 联网搜索 Key */}
-      <Section title="联网搜索 Key">
-        <p className="mb-4" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>
-          阿里云 IQS API Key，用于联网搜索功能
-        </p>
-        {iqsConfigured ? (
-          <div className="flex items-center gap-3 p-3 rounded-lg border" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
-            <code className="flex-1 text-xs font-mono truncate" style={{ color: 'var(--muted)' }}>{iqsKeyMasked}</code>
-            <BtnSecondary onClick={handleRemoveIqsKey}>移除</BtnSecondary>
-          </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <div className="relative flex-1">
+      <SettingBlock label="联网搜索 Key" desc="阿里云 IQS API Key，用于联网搜索功能">
+        {iqsConfigured && !iqsKeyInput ? (
+          <div className="flex items-center gap-3" style={{ marginTop: 8 }}>
+            <div className="flex items-center gap-2 relative flex-1 rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
               <input
                 type="password"
-                value={iqsKeyInput}
-                onChange={e => setIqsKeyInput(e.target.value)}
-                placeholder="输入 IQS API Key..."
-                className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
-                style={{
-                  backgroundColor: 'var(--surface)',
-                  borderColor: 'var(--border)',
-                  color: 'var(--fg)',
-                }}
-                onFocus={e => {
-                  (e.target as HTMLElement).style.borderColor = 'var(--accent)';
-                  (e.target as HTMLElement).style.boxShadow = '0 0 0 3px rgba(85,112,184,0.06)';
-                }}
-                onBlur={e => {
-                  (e.target as HTMLElement).style.borderColor = 'var(--border)';
-                  (e.target as HTMLElement).style.boxShadow = 'none';
-                }}
+                value={iqsKeyMasked}
+                readOnly
+                className="flex-1 px-4 py-2.5 border-none outline-none bg-transparent"
+                style={{ color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-mono)' }}
               />
+              <button type="button" onClick={() => { setIqsKeyInput(''); setShowIqsKey(false); }}
+                className="px-4 border-l text-sm font-medium transition-colors h-full"
+                style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
+                onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
+                onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
+                修改
+              </button>
             </div>
-            <BtnPrimary onClick={handleSaveIqsKey} disabled={iqsSaving || !iqsKeyInput.trim()}>
-              {iqsSaving ? '保存中...' : '保存'}
-            </BtnPrimary>
+          </div>
+        ) : (
+          <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', marginTop: 8 }}>
+            <div className="relative flex-1">
+              <input
+                type={showIqsKey ? 'text' : 'password'}
+                value={iqsKeyInput}
+                onChange={e => handleIqsKeyChange(e.target.value)}
+                placeholder="输入 IQS API Key..."
+                className="w-full px-4 py-2.5 border-none outline-none bg-transparent"
+                style={{ fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--fg)' }}
+              />
+              <button type="button" onClick={() => setShowIqsKey(!showIqsKey)} className="absolute right-3 top-2.5" style={{ color: 'var(--muted)' }}>
+                {showIqsKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <button type="button" onClick={handleTestIqsKey} disabled={iqsTesting}
+              className="px-4 border-l text-sm font-medium transition-colors"
+              style={{ borderColor: 'var(--border)', color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-body)' }}
+              onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
+              {iqsTesting ? '测试中...' : '测试'}
+            </button>
           </div>
         )}
-      </Section>
+        {iqsTestResult && (
+          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12 }}>
+            {iqsTestResult.success ? (
+              <>
+                <CheckCircle className="w-4 h-4" style={{ color: 'var(--success)' }} />
+                <span style={{ color: 'var(--success)' }}>连接成功 ({iqsTestResult.time}ms)</span>
+              </>
+            ) : (
+              <>
+                <XCircle className="w-4 h-4" style={{ color: 'var(--danger)' }} />
+                <span style={{ color: 'var(--danger)' }}>{iqsTestResult.error || '连接失败'}</span>
+              </>
+            )}
+          </div>
+        )}
+      </SettingBlock>
     </div>
   );
 }
@@ -232,79 +250,154 @@ function PageTitle({ title, desc }: { title: string; desc: string }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function SettingBlock({ label, desc, saved, children }: { label: string; desc: string; saved?: boolean; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border p-5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
-      <h3 className="uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 4 }}>
-        {title}
-      </h3>
+    <div style={{ marginBottom: 28 }}>
+      <div className="setting-group-label">{label}</div>
+      <p style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)', marginBottom: 8 }}>{desc}</p>
       {children}
+      {saved && (
+        <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)', marginLeft: 8 }}>已保存</span>
+      )}
     </div>
   );
 }
 
-function SelectField({ label, value, onChange, options, placeholder }: {
-  label: string; value: string; onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void; options: { value: string; label: string }[]; placeholder: string;
+// ===== 模型选择器（参考侧边栏助手选择器样式） =====
+function ModelSelect({
+  models, providers, selectedModelId, selectedModelName, onChange, placeholder, selectBy,
+}: {
+  models: Model[];
+  providers: Provider[];
+  selectedModelId: string;
+  selectedModelName?: string;
+  onChange: (modelId: string) => void;
+  placeholder: string;
+  selectBy: 'id' | 'name';
 }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', h), 0);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+
+  const filtered = search.trim()
+    ? models.filter(m => (m.display_name || m.name).toLowerCase().includes(search.toLowerCase()))
+    : models;
+
+  // 按提供商分组
+  const grouped: Record<string, Model[]> = {};
+  for (const m of filtered) {
+    const p = providers.find(p => p.id === m.provider_id);
+    const group = p?.name || '未知';
+    if (!grouped[group]) grouped[group] = [];
+    grouped[group].push(m);
+  }
+
   return (
-    <div>
-      <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>{label}</label>
-      <select value={value} onChange={onChange}
-        className="w-full px-3 py-2.5 rounded-lg border outline-none appearance-none"
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left"
         style={{
+          border: '1px solid var(--border)',
           backgroundColor: 'var(--surface)',
-          borderColor: 'var(--border)',
-          color: 'var(--fg)',
+          color: selectedModelName ? 'var(--fg)' : 'var(--muted)',
+          boxShadow: '0 1px 2px rgba(70, 85, 120, 0.04)',
           fontSize: 13,
           fontFamily: 'var(--font-body)',
         }}
-        onFocus={e => {
-          (e.target as HTMLElement).style.borderColor = 'var(--accent)';
-          (e.target as HTMLElement).style.boxShadow = '0 0 0 3px rgba(85,112,184,0.06)';
+        onMouseEnter={e => {
+          (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)';
+          (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 4px rgba(85, 112, 184, 0.1)';
         }}
-        onBlur={e => {
-          (e.target as HTMLElement).style.borderColor = 'var(--border)';
-          (e.target as HTMLElement).style.boxShadow = 'none';
+        onMouseLeave={e => {
+          (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+          (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 2px rgba(70, 85, 120, 0.04)';
         }}
       >
-        <option value="">{placeholder}</option>
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
-  );
-}
+        <span className="flex-1 truncate">{selectedModelName || placeholder}</span>
+        <ChevronDown
+          className="w-[10px] h-[10px] shrink-0 transition-transform duration-200"
+          style={{ color: 'var(--muted)', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        />
+      </button>
 
-function InputRow({ label, value, onChange, placeholder, type, children }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string; children?: React.ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>{label}</label>
-      <div className="relative">
-        <input
-          type={type || 'text'}
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full pl-3 pr-10 py-2.5 rounded-lg border outline-none"
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full mt-1 rounded-xl border py-1 z-50"
           style={{
             backgroundColor: 'var(--surface)',
             borderColor: 'var(--border)',
-            color: 'var(--fg)',
-            fontSize: 13,
-            fontFamily: 'var(--font-body)',
+            boxShadow: 'var(--shadow-dropdown)',
+            maxHeight: 280,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
           }}
-          onFocus={e => {
-            (e.target as HTMLElement).style.borderColor = 'var(--accent)';
-            (e.target as HTMLElement).style.boxShadow = '0 0 0 3px rgba(85,112,184,0.06)';
-          }}
-          onBlur={e => {
-            (e.target as HTMLElement).style.borderColor = 'var(--border)';
-            (e.target as HTMLElement).style.boxShadow = 'none';
-          }}
-        />
-        {children}
-      </div>
+        >
+          <div className="px-3 py-2 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2 w-3.5 h-3.5" style={{ color: 'var(--muted)' }} />
+              <input
+                placeholder="搜索模型..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                autoFocus
+                className="w-full pl-8 pr-2 py-1.5 rounded-lg border text-xs outline-none bg-transparent"
+                style={{ borderColor: 'var(--border)', color: 'var(--fg)', fontSize: 12, fontFamily: 'var(--font-body)' }}
+              />
+            </div>
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {Object.entries(grouped).map(([providerName, providerModels]) => (
+              <div key={providerName}>
+                <div className="px-3 py-1.5" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', color: 'var(--muted-soft)', textTransform: 'uppercase' }}>
+                  {providerName}
+                </div>
+                {providerModels.map(m => {
+                  const isSelected = selectBy === 'id' ? m.id === selectedModelId : m.name === selectedModelId;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => { onChange(m.id); setOpen(false); setSearch(''); }}
+                      className="w-full text-left flex items-center gap-3 px-3 py-2 transition-colors"
+                      style={{
+                        backgroundColor: isSelected ? 'var(--accent-dim)' : 'transparent',
+                        color: isSelected ? 'var(--accent)' : 'var(--fg)',
+                        fontSize: 13,
+                        fontWeight: isSelected ? 600 : 400,
+                        fontFamily: 'var(--font-body)',
+                      }}
+                      onMouseEnter={e => {
+                        if (!isSelected) (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)';
+                      }}
+                      onMouseLeave={e => {
+                        if (!isSelected) (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <span className="truncate">{m.display_name || m.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-3 py-4 text-center" style={{ fontSize: 12, color: 'var(--muted-soft)' }}>无匹配模型</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

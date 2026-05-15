@@ -108,3 +108,46 @@
   --warn:          #d4b44b;
   --danger:        #e4707a;
 }
+
+/* ===== 设置页通用样式 ===== */
+.setting-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-soft);
+  margin-bottom: 12px;
+  font-family: var(--font-body);
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.setting-row:last-child { border-bottom: none; }
+
+.setting-row-label {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  font-family: var(--font-body);
+}
+
+.setting-row-desc {
+  font-size: 11px;
+  color: var(--muted-soft);
+  letter-spacing: 0.01em;
+  font-family: var(--font-body);
+  margin-top: 2px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}

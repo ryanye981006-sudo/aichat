@@ -95,6 +95,7 @@ export const toolsApi = {
 export const settingsApi = {
   getIqsKey: () => request<{ configured: boolean; masked: string }>('/settings/iqs-key'),
   updateIqsKey: (apiKey: string) => request<{ success: boolean; configured: boolean }>('/settings/iqs-key', { method: 'PUT', body: JSON.stringify({ apiKey }) }),
+  testIqsKey: (apiKey: string) => request<{ success: boolean; time: number; error?: string }>('/settings/iqs-key/test', { method: 'POST', body: JSON.stringify({ apiKey }) }),
 };
 
 export const chatFileApi = {

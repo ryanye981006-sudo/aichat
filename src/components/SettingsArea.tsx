@@ -30,7 +30,7 @@ export default function SettingsArea({ activeTab, onClose }: SettingsAreaProps) 
       case 'model':
         return <ModelSettings />;
       case 'memory':
-        return <MemorySettings providers={providers} models={models} />;
+        return <MemorySettings />;
       case 'tools':
         return <ToolsSettings providers={providers} models={models} />;
     }
