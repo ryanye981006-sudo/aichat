@@ -818,12 +818,12 @@ export default function App() {
 
   return (
     <WindowFrame
-      showWindowFrame={isWindowedPreview}
+      showWindowFrame={true}
       isWindowed={isWindowedPreview}
       onToggleWindowed={() => setIsWindowedPreview(!isWindowedPreview)}
     >
       <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--bg)' }}>
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden" style={{ minWidth: 0 }}>
           <Sidebar
             assistants={assistants}
             conversations={conversations}

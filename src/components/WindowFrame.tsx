@@ -10,6 +10,8 @@ interface WindowFrameProps {
 
 export default function WindowFrame({ showWindowFrame, onToggleWindowed, isWindowed, children }: WindowFrameProps) {
   const [transitioning, setTransitioning] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const handleToggle = useCallback(() => {
     if (transitioning) return;
@@ -48,7 +50,7 @@ export default function WindowFrame({ showWindowFrame, onToggleWindowed, isWindo
           minHeight: isWindowed ? 460 : undefined,
           maxWidth: isWindowed ? '95vw' : undefined,
           maxHeight: isWindowed ? '90vh' : undefined,
-          transition: `width 0.45s var(--ease-out-standard), height 0.45s var(--ease-out-standard)`,
+          transition: mounted ? `width 0.45s var(--ease-out-standard), height 0.45s var(--ease-out-standard)` : 'none',
           position: 'relative',
         }}
       >
