@@ -1,10 +1,10 @@
-// 模型设置：供应商管理 + 模型管理 + IQS Key
+// 模型设置：供应商管理 + 模型管理
 import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model } from '../../types';
-import { providersApi, modelsApi, settingsApi } from '../../services/api';
+import { providersApi, modelsApi } from '../../services/api';
 import { Toggle, BtnPrimary, BtnSecondary, BtnDanger } from '../shared/Primitives';
 import { cn } from '../../lib/utils';
-import { Search, Plus, Eye, EyeOff, Minus, Box, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, ChevronRight, Globe } from 'lucide-react';
+import { Search, Plus, Eye, EyeOff, Minus, Box, RefreshCw, Activity, Loader2, CheckCircle, XCircle, Trash2, ChevronRight } from 'lucide-react';
 
 // 与后端一致的 base_url 规范化
 function normalizeBaseUrl(url: string): string {
@@ -47,12 +47,6 @@ export default function ModelSettings() {
   const [testingModels, setTestingModels] = useState(false);
   const [modelTestResults, setModelTestResults] = useState<Record<string, { status: 'success' | 'error'; time: number; error?: string }>>({});
 
-  // IQS Key
-  const [iqsConfigured, setIqsConfigured] = useState(false);
-  const [iqsKeyMasked, setIqsKeyMasked] = useState('');
-  const [iqsKeyInput, setIqsKeyInput] = useState('');
-  const [iqsSaving, setIqsSaving] = useState(false);
-
   // Toast
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -66,14 +60,12 @@ export default function ModelSettings() {
 
   const loadData = async () => {
     try {
-      const [p, m, iqs] = await Promise.all([
-        providersApi.list(), modelsApi.list(), settingsApi.getIqsKey(),
+      const [p, m] = await Promise.all([
+        providersApi.list(), modelsApi.list(),
       ]);
       setProviders(p);
       setModels(m);
       if (!selectedProviderId && p.length > 0) setSelectedProviderId(p[0].id);
-      setIqsConfigured(iqs.configured);
-      setIqsKeyMasked(iqs.masked || '');
     } catch (e) { console.error('加载模型数据失败:', e); }
   };
 
@@ -181,22 +173,8 @@ export default function ModelSettings() {
     setTestingModels(false);
   };
 
-  // ===== IQS Key =====
-  const handleSaveIqsKey = async () => {
-    if (!iqsKeyInput.trim()) return;
-    setIqsSaving(true);
-    try {
-      await settingsApi.updateIqsKey(iqsKeyInput.trim());
-      await loadData();
-      setIqsKeyInput('');
-      showToast('IQS API Key 已保存');
-    } catch (e: any) {
-      showToast(e.message || '保存失败');
-    } finally { setIqsSaving(false); }
-  };
-
   return (
-    <div className="flex h-full w-full overflow-hidden">
+    <div className="flex flex-col h-full w-full overflow-hidden" style={{ backgroundColor: 'var(--chat-bg)' }}>
       {/* Toast */}
       {toast && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] px-5 py-2.5 rounded-xl shadow-lg text-sm font-medium"
@@ -206,112 +184,103 @@ export default function ModelSettings() {
         </div>
       )}
 
-      {/* ===== 左面板：供应商列表 ===== */}
-      <div className="w-[240px] flex flex-col border-r shrink-0" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--sidebar-bg)' }}>
-        {/* 搜索 */}
-        <div className="p-3">
-          <div className="relative">
+      {/* ===== 上半部：供应商选择区 ===== */}
+      <div className="shrink-0" style={{ padding: '20px 24px 18px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 w-3.5 h-3.5" style={{ color: 'var(--muted)' }} />
             <input
-              placeholder="搜索提供商..."
+              placeholder="搜索供应商..."
               className="w-full pl-9 pr-3 py-2 bg-transparent rounded-lg text-sm outline-none"
               style={{ color: 'var(--fg)' }}
               value={providerSearch}
               onChange={e => setProviderSearch(e.target.value)}
             />
           </div>
-        </div>
-
-        {/* 供应商列表 */}
-        <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
-          {filteredProviders.map(p => (
-            <button
-              key={p.id}
-              onClick={() => setSelectedProviderId(p.id)}
-              className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors"
-              style={{
-                backgroundColor: selectedProviderId === p.id ? 'var(--accent-dim)' : 'transparent',
-                color: selectedProviderId === p.id ? 'var(--accent)' : 'var(--fg)',
-              }}
-            >
-              <span className="truncate">{p.name}</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded border" style={{
-                color: p.enabled ? 'var(--accent)' : 'var(--muted)',
-                borderColor: p.enabled ? 'var(--accent-soft)' : 'var(--border)',
-              }}>
-                {p.enabled ? 'ON' : 'OFF'}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* 添加按钮 */}
-        <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
           <button
             onClick={() => setShowAddProvider(true)}
-            className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border transition-colors"
-            style={{ borderColor: 'var(--border)', color: 'var(--fg)' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'; }}
+            style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-full)',
+              border: '1px dashed var(--accent)', background: 'transparent',
+              fontSize: 12, fontWeight: 500, letterSpacing: '0.01em',
+              color: 'var(--accent)', cursor: 'pointer', fontFamily: 'var(--font-body)',
+              display: 'flex', alignItems: 'center', gap: 4, transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--accent-dim)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
           >
-            <Plus className="w-4 h-4" /> 添加
+            <Plus className="w-3.5 h-3.5" /> 添加供应商
           </button>
+          <span style={{
+            fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
+            textTransform: 'uppercase', color: 'var(--muted-soft)',
+          }}>
+            供应商
+          </span>
         </div>
 
-        {/* IQS Key */}
-        <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
-          <div className="flex items-center gap-2 mb-2">
-            <Globe className="w-3.5 h-3.5" style={{ color: 'var(--muted)' }} />
-            <span className="text-xs font-medium" style={{ color: 'var(--muted)' }}>IQS 搜索 Key</span>
-            <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full", iqsConfigured ? 'text-green-600 bg-green-50' : 'text-yellow-600 bg-yellow-50')}>
-              {iqsConfigured ? '已配置' : '未配置'}
-            </span>
+        {providers.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--muted-soft)', letterSpacing: '0.01em', padding: '14px 0' }}>
+            尚未添加供应商，点击上方按钮添加。
           </div>
-          {iqsConfigured ? (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <code className="flex-1 px-2 py-1.5 rounded text-xs truncate" style={{ backgroundColor: 'rgba(0,0,0,0.05)', color: 'var(--muted)', fontSize: '10px' }}>
-                  {iqsKeyMasked}
-                </code>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {filteredProviders.map(p => {
+              const count = models.filter(m => m.provider_id === p.id).length;
+              const active = selectedProviderId === p.id;
+              return (
                 <button
-                  onClick={async () => {
-                    setIqsSaving(true);
-                    try { await settingsApi.updateIqsKey(''); await loadData(); } catch (e) { console.error(e); }
-                    finally { setIqsSaving(false); }
+                  key={p.id}
+                  onClick={() => setSelectedProviderId(p.id)}
+                  style={{
+                    padding: '7px 16px', borderRadius: 'var(--radius-full)',
+                    border: active ? '1px solid var(--accent)' : '1px solid var(--border)',
+                    background: active ? 'var(--accent)' : 'transparent',
+                    fontSize: 13, fontWeight: 500, letterSpacing: '0.01em',
+                    color: active ? '#fff' : 'var(--muted)', cursor: 'pointer',
+                    fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6,
+                    boxShadow: active ? '0 1px 4px rgba(85, 112, 184, 0.2)' : 'none',
+                    transition: 'all 0.2s',
                   }}
-                  className="text-xs transition-colors hover:opacity-70 shrink-0"
-                  style={{ color: 'var(--danger)' }}>移除</button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <input
-                type="password"
-                value={iqsKeyInput}
-                onChange={e => setIqsKeyInput(e.target.value)}
-                placeholder="输入 IQS API Key..."
-                className="w-full px-2.5 py-1.5 rounded-lg border text-xs outline-none"
-                style={{ borderColor: 'var(--border)', color: 'var(--fg)', backgroundColor: 'var(--chat-bg)' }}
-              />
-              <button
-                onClick={handleSaveIqsKey}
-                disabled={iqsSaving || !iqsKeyInput.trim()}
-                className="w-full py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40 text-white"
-                style={{ backgroundColor: 'var(--accent)' }}>
-                {iqsSaving ? '保存中...' : '保存'}
-              </button>
-            </div>
-          )}
-        </div>
+                  onMouseEnter={e => {
+                    if (!active) {
+                      (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)';
+                      (e.currentTarget as HTMLElement).style.color = 'var(--accent)';
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!active) {
+                      (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+                      (e.currentTarget as HTMLElement).style.color = 'var(--muted)';
+                    }
+                  }}
+                >
+                  {p.name}
+                  <span style={{
+                    fontSize: 10, color: active ? '#fff' : 'var(--muted-soft)',
+                    fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums',
+                    background: active ? 'rgba(255,255,255,0.2)' : 'rgba(70,85,120,0.06)',
+                    padding: '1px 6px', borderRadius: 'var(--radius-full)',
+                  }}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {/* ===== 右面板：供应商详情 ===== */}
+      {/* ===== 下半部：供应商详细配置 ===== */}
       {selectedProvider ? (
         <div className="flex-1 overflow-y-auto">
           <div className="px-8 py-6 w-full">
-            {/* Header */}
+            {/* Provider Header */}
             <div className="flex items-center gap-2 mb-6 pb-4 border-b" style={{ borderColor: 'var(--border)' }}>
-              <h2 className="text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
+              <h2 style={{
+                color: 'var(--fg)', fontFamily: 'var(--font-display)',
+                fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em',
+              }}>
                 {selectedProvider.name}
               </h2>
               <div className="flex-1" />
@@ -453,7 +422,7 @@ export default function ModelSettings() {
                     );
                   })}
                   {providerModels.length === 0 && (
-                    <div className="p-6 text-center text-sm" style={{ color: 'var(--muted)' }}>暂无模型</div>
+                    <div className="p-6 text-center text-sm" style={{ color: 'var(--muted)' }}>暂无模型，点击上方按钮获取或添加。</div>
                   )}
                 </div>
               </FormSection>
@@ -461,8 +430,8 @@ export default function ModelSettings() {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--muted)' }}>
-          请选择左侧提供商
+        <div className="flex-1 flex items-center justify-center" style={{ color: 'var(--muted-soft)', fontSize: 13, letterSpacing: '0.01em' }}>
+          ← 请在上方选择一个供应商
         </div>
       )}
 
@@ -583,7 +552,7 @@ function AddProviderModal({ onClose, onSave }: { onClose: () => void; onSave: (n
             </select>
           </div>
           {error && <p className="text-xs" style={{ color: 'var(--danger)' }}>{error}</p>}
-          <p className="text-xs" style={{ color: 'var(--muted)' }}>添加后可在右侧面板配置 API 地址和密钥</p>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>添加后可在下方配置 API 地址和密钥</p>
         </div>
         <div className="flex justify-end gap-3 border-t" style={{ padding: '14px 22px', borderColor: 'var(--border)' }}>
           <BtnSecondary onClick={onClose}>取消</BtnSecondary>
