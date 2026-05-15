@@ -55,9 +55,7 @@ export default function MemorySettings() {
   };
 
   return (
-    <div className="w-full py-8 px-6 space-y-10">
-      <PageTitle title="长期记忆" desc="管理全局记忆开关与您的个人背景信息" />
-
+    <div className="w-full py-6 px-6 space-y-10">
       {/* 记忆系统 */}
       <div style={{ marginBottom: 28 }}>
         <div className="setting-group-label">记忆系统</div>
@@ -116,17 +114,6 @@ export default function MemorySettings() {
 }
 
 // ===== 内联组件 =====
-
-function PageTitle({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div>
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
-        {title}
-      </h2>
-      <p className="mt-1" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>{desc}</p>
-    </div>
-  );
-}
 
 function StatCard({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (

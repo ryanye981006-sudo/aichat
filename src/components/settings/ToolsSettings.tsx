@@ -124,9 +124,7 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
   const rerankModel = models.find(m => m.name === rerankModelName);
 
   return (
-    <div className="w-full py-8 px-6 space-y-10">
-      <PageTitle title="工具设置" desc="配置记忆提取、向量检索与联网搜索所需的模型与密钥" />
-
+    <div className="w-full py-6 px-6 space-y-10">
       {/* 记忆提取 LLM 模型 */}
       <SettingBlock label="记忆提取 LLM 模型" desc="选择用于从对话中提取长期记忆的大语言模型" saved={memLlmSaved}>
         <ModelSelect
@@ -220,17 +218,6 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
 }
 
 // ===== 内联组件 =====
-
-function PageTitle({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div>
-      <h2 className="text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
-        {title}
-      </h2>
-      <p className="mt-1" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>{desc}</p>
-    </div>
-  );
-}
 
 function SettingBlock({ label, desc, saved, children }: { label: string; desc: string; saved?: boolean; children: React.ReactNode }) {
   return (
