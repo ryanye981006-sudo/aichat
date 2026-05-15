@@ -185,7 +185,7 @@ export default function ModelSettings() {
       )}
 
       {/* ===== 上半部：供应商选择区 ===== */}
-      <div className="shrink-0" style={{ padding: '20px 24px 18px', borderBottom: '1px solid var(--border)' }}>
+      <div className="shrink-0" style={{ padding: '20px 32px 18px', borderBottom: '1px solid var(--border)' }}>
         <div className="setting-group-label" style={{ marginBottom: 10 }}>供应商</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
           <div className="relative flex-1">
