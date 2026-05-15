@@ -74,7 +74,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
       <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--fg)', letterSpacing: '0.06em' }}>全局记忆</h3>
+            <h3 className="uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 4 }}>全局记忆</h3>
             <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
               {settings?.enabled ? '已开启 — 系统会自动从对话中提取记忆' : '已关闭 — 不会自动提取新记忆'}
             </p>
@@ -109,7 +109,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
       {/* 个人简介 Textarea */}
       <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
         <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--fg)', letterSpacing: '0.06em' }}>个人简介</h3>
+          <h3 className="uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 4 }}>个人简介</h3>
           <p className="text-xs mt-0.5" style={{ color: 'var(--muted)' }}>
             每行一个条目，格式为 "键: 值"。AI 在对话时会参考这些信息
           </p>
@@ -221,7 +221,7 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
         <div className="space-y-5 overflow-y-auto" style={{ padding: 22 }}>
           {/* LLM 模型选择 */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>LLM 模型（记忆提取）</label>
+            <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>LLM 模型（记忆提取）</label>
             <select value={llmProviderId} onChange={e => { setLlmProviderId(e.target.value); setLlmModelId(''); }}
               className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none mb-2"
               style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
@@ -238,7 +238,7 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
 
           {/* 嵌入模型选择 */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>嵌入模型</label>
+            <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>嵌入模型</label>
             <select value={embProviderId} onChange={e => { setEmbProviderId(e.target.value); setEmbModelId(''); }}
               className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none mb-2"
               style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }}>
@@ -255,7 +255,7 @@ function MemorySettingsModal({ settings, providers, models, onClose, onSave }: {
 
           {/* 嵌入维度 */}
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>嵌入维度</label>
+            <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 8 }}>嵌入维度</label>
             <input type="number" value={embDim} onChange={e => setEmbDim(parseInt(e.target.value) || 1536)}
               className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none"
               style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)', color: 'var(--fg)' }} />

@@ -236,7 +236,7 @@ function PageTitle({ icon, title, desc }: { icon: string; title: string; desc: s
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border p-5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
-      <h3 className="text-sm font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--fg)', letterSpacing: '0.06em' }}>
+      <h3 className="uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 4 }}>
         {title}
       </h3>
       {children}
@@ -249,7 +249,7 @@ function SelectField({ label, value, onChange, options, placeholder }: {
 }) {
   return (
     <div>
-      <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>{label}</label>
+      <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>{label}</label>
       <select value={value} onChange={onChange}
         className="w-full px-3 py-2.5 rounded-lg border text-sm outline-none appearance-none"
         style={{
@@ -278,7 +278,7 @@ function InputRow({ label, value, onChange, placeholder, type, children }: {
 }) {
   return (
     <div>
-      <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--muted)', letterSpacing: '0.06em' }}>{label}</label>
+      <label className="block uppercase" style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', color: 'var(--muted-soft)', marginBottom: 6 }}>{label}</label>
       <div className="relative">
         <input
           type={type || 'text'}
