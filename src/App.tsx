@@ -19,9 +19,8 @@ export default function App() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
-  const [isSettingsMode, setIsSettingsMode] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'model' | 'memory' | 'profile'>('model');
-  const [sidebarTab, setSidebarTab] = useState<'assistants' | 'topics'>('assistants');
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'model' | 'memory' | 'tools'>('model');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   // 窗口预览模式（开发阶段模拟 Electron 窗口效果）
@@ -161,8 +160,7 @@ export default function App() {
     }
 
     setCurrentAssistantId(id);
-    setSidebarTab('topics');
-    setIsSettingsMode(false);
+    setShowSettings(false);
     try {
       const convs = await conversationsApi.list(id);
       setConversations(convs);
@@ -219,7 +217,6 @@ export default function App() {
         const created = await assistantsApi.create(data);
         setAssistants(prev => [created, ...prev]);
         setCurrentAssistantId(created.id);
-        setSidebarTab('topics');
         const conv = await conversationsApi.create(created.id, '新话题');
         setConversations([conv]);
         setCurrentConversationId(conv.id);
@@ -269,7 +266,7 @@ export default function App() {
     // 手动同步 ref，消除切换时 ref 与 state 的时序差，防止 SSE 回调被误拦
     currentConversationIdRef.current = id;
     setCurrentConversationId(id);
-    setIsSettingsMode(false);
+    setShowSettings(false);
 
     // 若目标会话仍有活跃 SSE，恢复流式状态（停止按钮可用）
     if (abortControllersRef.current[id]) {
@@ -309,7 +306,7 @@ export default function App() {
       currentConversationIdRef.current = conv.id;
       setCurrentConversationId(conv.id);
       setMessages([]);
-      setIsSettingsMode(false);
+      setShowSettings(false);
     } catch (e) { console.error(e); }
   };
 
@@ -821,10 +818,11 @@ export default function App() {
 
   return (
     <WindowFrame
+      showWindowFrame={isWindowedPreview}
       isWindowed={isWindowedPreview}
       onToggleWindowed={() => setIsWindowedPreview(!isWindowedPreview)}
     >
-      <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--color-background)' }}>
+      <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--bg)' }}>
         <div className="flex flex-1 overflow-hidden">
           <Sidebar
             assistants={assistants}
@@ -838,46 +836,42 @@ export default function App() {
             onEditAssistant={handleEditAssistant}
             onRemoveAssistant={handleRemoveAssistant}
             onRemoveConversation={handleRemoveConversation}
-            isSettingsMode={isSettingsMode}
-            onToggleSettings={setIsSettingsMode}
-            settingsTab={settingsTab}
-            onSettingsTabChange={setSettingsTab}
-            sidebarTab={sidebarTab}
-            onSidebarTabChange={setSidebarTab}
-            isWindowedPreview={isWindowedPreview}
-            onToggleWindowedPreview={() => setIsWindowedPreview(!isWindowedPreview)}
+            onOpenSettings={() => setShowSettings(true)}
           />
-          {isSettingsMode ? (
-            <SettingsArea activeTab={settingsTab} />
-          ) : (
-            <ChatArea
-              assistant={currentAssistant}
-              messages={messages}
-              onSendMessage={handleSendMessage}
-              isStreaming={isStreaming}
-              onStopGeneration={handleStopGeneration}
-              onEditAssistant={handleEditAssistant}
-              onThinkingModeChange={handleThinkingModeChange}
-              onRegenerate={handleRegenerate}
-              providers={providers}
-              models={models}
-              conversationId={currentConversationId}
-              conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
-              deepThinkingMode={currentUIState.deepThinkingMode}
-              onDeepThinkingChange={(mode) => setCurrentUIState({ deepThinkingMode: mode })}
-              webSearchEnabled={currentUIState.webSearchEnabled}
-              onWebSearchToggle={() => setCurrentUIState({ webSearchEnabled: !currentUIState.webSearchEnabled })}
-              onTogglePrivacyMode={() => {
-                if (!currentConversationId) return;
-                const current = conversations.find(c => c.id === currentConversationId);
-                const newMode = current?.privacy_mode ? 0 : 1;
-                conversationsApi.update(currentConversationId, { privacy_mode: newMode }).then(c => {
-                  setConversations(prev => prev.map(x => x.id === c.id ? c : x));
-                }).catch(() => {});
-              }}
-            />
-          )}
+          <ChatArea
+            assistant={currentAssistant}
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            isStreaming={isStreaming}
+            onStopGeneration={handleStopGeneration}
+            onEditAssistant={handleEditAssistant}
+            onThinkingModeChange={handleThinkingModeChange}
+            onRegenerate={handleRegenerate}
+            providers={providers}
+            models={models}
+            conversationId={currentConversationId}
+            conversationPrivacyMode={conversations.find(c => c.id === currentConversationId)?.privacy_mode || 0}
+            deepThinkingMode={currentUIState.deepThinkingMode}
+            onDeepThinkingChange={(mode) => setCurrentUIState({ deepThinkingMode: mode })}
+            webSearchEnabled={currentUIState.webSearchEnabled}
+            onWebSearchToggle={() => setCurrentUIState({ webSearchEnabled: !currentUIState.webSearchEnabled })}
+            onTogglePrivacyMode={() => {
+              if (!currentConversationId) return;
+              const current = conversations.find(c => c.id === currentConversationId);
+              const newMode = current?.privacy_mode ? 0 : 1;
+              conversationsApi.update(currentConversationId, { privacy_mode: newMode }).then(c => {
+                setConversations(prev => prev.map(x => x.id === c.id ? c : x));
+              }).catch(() => {});
+            }}
+          />
         </div>
+
+        {showSettings && (
+          <SettingsArea
+            activeTab={settingsTab}
+            onClose={() => setShowSettings(false)}
+          />
+        )}
 
         <AssistantModal
           isOpen={isModalOpen}
@@ -886,6 +880,7 @@ export default function App() {
           assistant={editingAssistant}
           providers={providers}
           models={models}
+          onDelete={handleRemoveAssistant}
         />
       </div>
     </WindowFrame>

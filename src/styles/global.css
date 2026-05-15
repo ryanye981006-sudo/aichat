@@ -3,6 +3,7 @@
    ============================================================ */
 
 @import './tokens.css';
+@import './design-tokens.css';
 @import './tailwind.css';
 @import './animations.css';
 

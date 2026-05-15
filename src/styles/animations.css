@@ -1,7 +1,8 @@
 /* ============================================================
-   动画工具类 — 从 CherryStudio 提取
+   动画关键帧 — 来自设计体系规范 + 保留旧版动画
    ============================================================ */
 
+/* ===== 保留旧版动画（向后兼容） ===== */
 /* 脉冲动画 */
 @keyframes animation-pulse {
   0% { box-shadow: 0 0 0 0 rgba(var(--pulse-color), 0.5); }
@@ -61,4 +62,47 @@
 }
 .animation-locate-highlight {
   animation: animation-locate-highlight 2.5s ease-in-out;
+}
+
+/* ===== 新设计系统动画 ===== */
+/* 消息入场 */
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 流式生成圆点弹跳 */
+@keyframes dot-bounce {
+  0%, 100% { transform: translateY(0); opacity: 0.25; }
+  50%      { transform: translateY(-7px); opacity: 1; }
+}
+
+/* 工具调用运行中脉冲 */
+@keyframes tc-pulse {
+  0%, 100% { opacity: 0.35; }
+  50%      { opacity: 1; }
+}
+
+/* 模态背板淡入 */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 模态弹窗入场 */
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-12px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 下拉菜单入场 */
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* 徽章弹出 */
+@keyframes badge-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1); }
 }

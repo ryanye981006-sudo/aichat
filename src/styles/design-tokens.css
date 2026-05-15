@@ -1,0 +1,108 @@
+/* ============================================================
+   AI Chat Windows 客户端 — 设计令牌（方案B：暮山紫）
+
+   所有色值、间距、阴影等在此定义。禁止在组件中硬编码色值。
+   ============================================================ */
+
+:root {
+  /* ===== 颜色令牌 ===== */
+  --sidebar-bg:    #dadfef;
+  --bg:            #e8edf7;
+  --surface:       #f5f7fc;
+  --chat-bg:       #f5f7fc;
+  --fg:            #3d4f70;
+  --muted:         #6b7c9e;
+  --muted-soft:    #8c9ab6;
+  --border:        rgba(70, 85, 120, 0.1);
+  --border-soft:   rgba(70, 85, 120, 0.05);
+  --accent:        #5570b8;
+  --accent-hover:  #4460a8;
+  --accent-dim:    rgba(85, 112, 184, 0.1);
+  --accent-soft:   rgba(85, 112, 184, 0.35);
+
+  --user-bubble:   #e8edf7;
+  --ai-bubble:     #dfe5f4;
+  --hover-bg:      #d2d9ed;
+  --active-bg:     #cbd4e8;
+
+  --success:       #4a9e6e;
+  --warn:          #c9a43b;
+  --danger:        #d4606a;
+
+  /* ===== 字体系统 ===== */
+  --font-display:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
+  --font-body:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:
+    'Cascadia Code', 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'Consolas', monospace;
+
+  /* ===== 间距体系 ===== */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* ===== 圆角令牌 ===== */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+
+  /* ===== 布局尺寸 ===== */
+  --sidebar-w: 262px;
+  --sidebar-w-mini: 212px;
+  --titlebar-h: 42px;
+
+  /* ===== 阴影层级 ===== */
+  --shadow-window:
+    0 0 0 1px rgba(255,255,255,0.08),
+    0 2px 4px rgba(0,0,0,0.04),
+    0 8px 24px rgba(30,38,64,0.12),
+    0 24px 64px rgba(30,38,64,0.25),
+    0 40px 100px rgba(30,38,64,0.35);
+  --shadow-micro: 0 1px 2px rgba(70, 85, 120, 0.04);
+  --shadow-button: 0 1px 3px rgba(85, 112, 184, 0.2);
+  --shadow-button-hover: 0 2px 6px rgba(85, 112, 184, 0.35);
+  --shadow-modal:
+    0 0 0 1px rgba(255,255,255,0.5),
+    0 8px 24px rgba(40, 50, 80, 0.08),
+    0 20px 56px rgba(40, 50, 80, 0.16);
+  --shadow-dropdown:
+    0 4px 16px rgba(40, 50, 80, 0.08),
+    0 10px 32px rgba(40, 50, 80, 0.12);
+
+  /* ===== 过渡曲线 ===== */
+  --ease-out-standard: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-enter-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-fast: 0.12s ease;
+}
+
+/* ===== 暗色主题适配 ===== */
+[theme-mode='dark'] {
+  --sidebar-bg:    #1e2640;
+  --bg:            #252d4a;
+  --surface:       #2a3352;
+  --chat-bg:       #252d4a;
+  --fg:            #e2e8f4;
+  --muted:         #8899b8;
+  --muted-soft:    #6b7a9a;
+  --border:        rgba(220, 230, 255, 0.08);
+  --border-soft:   rgba(220, 230, 255, 0.04);
+  --accent:        #7b93d4;
+  --accent-hover:  #8ba3e0;
+  --accent-dim:    rgba(123, 147, 212, 0.12);
+  --accent-soft:   rgba(123, 147, 212, 0.3);
+
+  --user-bubble:   #2e3a5c;
+  --ai-bubble:     #28304a;
+  --hover-bg:      #313a5a;
+  --active-bg:     #384468;
+  --success:       #5aae7e;
+  --warn:          #d4b44b;
+  --danger:        #e4707a;
+}

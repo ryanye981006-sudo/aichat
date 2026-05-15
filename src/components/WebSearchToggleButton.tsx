@@ -18,9 +18,9 @@ export default function WebSearchToggleButton({ enabled, onChange }: WebSearchTo
         enabled && 'ring-1'
       )}
       style={{
-        borderColor: enabled ? '#16a34a' : 'var(--color-border)',
-        color: enabled ? '#16a34a' : 'var(--color-text-2)',
-        backgroundColor: enabled ? 'rgba(22,163,74,0.08)' : 'transparent',
+        borderColor: enabled ? 'var(--success)' : 'var(--border)',
+        color: enabled ? 'var(--success)' : 'var(--muted)',
+        backgroundColor: enabled ? 'rgba(74,158,110,0.08)' : 'transparent',
       }}
     >
       <Globe className="w-3 h-3" />

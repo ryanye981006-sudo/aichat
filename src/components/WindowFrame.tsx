@@ -1,14 +1,24 @@
-import { ReactNode } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+// 桌面窗口框架 — 模拟标题栏 + 窗口控件 + 全屏/小窗切换
+import { ReactNode, useState, useCallback, useEffect } from 'react';
 
 interface WindowFrameProps {
-  isWindowed: boolean;
+  showWindowFrame: boolean;
   onToggleWindowed: () => void;
+  isWindowed: boolean;
   children: ReactNode;
 }
 
-export default function WindowFrame({ isWindowed, onToggleWindowed, children }: WindowFrameProps) {
-  if (!isWindowed) {
+export default function WindowFrame({ showWindowFrame, onToggleWindowed, isWindowed, children }: WindowFrameProps) {
+  const [transitioning, setTransitioning] = useState(false);
+
+  const handleToggle = useCallback(() => {
+    if (transitioning) return;
+    setTransitioning(true);
+    onToggleWindowed();
+    setTimeout(() => setTransitioning(false), 450);
+  }, [transitioning, onToggleWindowed]);
+
+  if (!showWindowFrame) {
     return <>{children}</>;
   }
 
@@ -19,125 +29,158 @@ export default function WindowFrame({ isWindowed, onToggleWindowed, children }: 
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        backgroundColor: 'var(--color-window-bg, #e8e8e8)',
-        padding: '40px 20px',
+        background: '#354060',
+        backgroundImage: 'radial-gradient(ellipse at 50% 30%, #4a5980 0%, #2d3655 80%)',
+        padding: 20,
       }}
     >
       <div
         style={{
-          width: '1200px',
-          height: '800px',
-          maxWidth: '98vw',
-          maxHeight: '98vh',
           display: 'flex',
           flexDirection: 'column',
-          borderRadius: '10px',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.1)',
+          borderRadius: 'var(--radius-lg)',
           overflow: 'hidden',
-          backgroundColor: 'var(--color-background)',
+          background: 'var(--bg)',
+          boxShadow: 'var(--shadow-window)',
+          width: isWindowed ? 900 : 1200,
+          height: isWindowed ? 680 : 800,
+          minWidth: isWindowed ? 600 : undefined,
+          minHeight: isWindowed ? 460 : undefined,
+          maxWidth: isWindowed ? '95vw' : undefined,
+          maxHeight: isWindowed ? '90vh' : undefined,
+          transition: `width 0.45s var(--ease-out-standard), height 0.45s var(--ease-out-standard)`,
+          position: 'relative',
         }}
       >
-        {/* 模拟标题栏 */}
+        {/* 标题栏 */}
         <div
           style={{
-            height: '32px',
+            height: 'var(--titlebar-h)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
             padding: '0 12px',
-            backgroundColor: 'var(--color-surface, #f5f5f5)',
-            borderBottom: '1px solid var(--color-border, #e0e0e0)',
-            cursor: 'default',
-            userSelect: 'none',
+            background: 'var(--sidebar-bg)',
+            borderBottom: '1px solid var(--border)',
             flexShrink: 0,
+            userSelect: 'none',
+            gap: 10,
           }}
         >
+          {/* Logo */}
+          <div
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 7,
+              background: 'linear-gradient(135deg, var(--accent), #7b92ce)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 12,
+              fontWeight: 700,
+              flexShrink: 0,
+              boxShadow: '0 1px 3px rgba(68,96,168,0.25)',
+            }}
+          >
+            A
+          </div>
+          {/* 标题 */}
           <span
             style={{
-              fontSize: '12px',
-              color: 'var(--color-text-secondary, #666)',
+              fontSize: 12,
               fontWeight: 500,
+              fontFamily: 'var(--font-display)',
+              color: 'var(--muted)',
+              flex: 1,
             }}
           >
             aichat
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            {/* 全屏切换按钮 */}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleWindowed();
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '20px',
-                height: '20px',
-                border: 'none',
-                background: 'none',
-                cursor: 'pointer',
-                borderRadius: '4px',
-                color: 'var(--color-text-secondary, #666)',
-                padding: 0,
-              }}
-              title="退出窗口预览"
-            >
-              <Maximize2 size={13} />
-            </button>
-            {/* 窗口控件装饰 */}
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '20px',
-                height: '20px',
-                borderRadius: '4px',
-              }}
-              title="最小化（装饰）"
-            >
-              <Minimize2 size={13} style={{ color: 'var(--color-text-tertiary, #999)' }} />
-            </span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '20px',
-                height: '20px',
-                borderRadius: '4px',
-              }}
-              title="最大化（装饰）"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-text-tertiary, #999)' }}>
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-              </svg>
-            </span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: '20px',
-                height: '20px',
-                borderRadius: '4px',
-                color: 'var(--color-text-tertiary, #999)',
-              }}
-              title="关闭（装饰）"
-            >
+
+          {/* 窗口控件 */}
+          <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+            <WindowCtrl title="最小化" onClick={() => {}}>
+              <svg width="10" height="2" viewBox="0 0 10 2"><rect width="10" height="2" fill="currentColor" /></svg>
+            </WindowCtrl>
+            <WindowCtrl title={isWindowed ? '最大化' : '窗口化'} onClick={handleToggle}>
+              {isWindowed ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="5" width="14" height="14" rx="2" />
+                  <path d="M17 9h-3.5a2 2 0 0 0-2 2V15" />
+                </svg>
+              )}
+            </WindowCtrl>
+            <WindowCtrl title="关闭" isClose onClick={() => {}}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
-            </span>
+            </WindowCtrl>
           </div>
         </div>
-        {/* 窗口内容区 */}
+
+        {/* 内容区 */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex' }}>
           {children}
         </div>
+
+        {/* 小窗右下角拖拽手柄 */}
+        {isWindowed && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              right: 0,
+              width: 18,
+              height: 18,
+              cursor: 'nwse-resize',
+              zIndex: 100,
+              background: 'linear-gradient(135deg, transparent 0%, transparent 50%, var(--border) 50%, var(--border) 60%, transparent 60%, transparent 65%, var(--border) 65%, var(--border) 75%, transparent 75%, transparent 80%, var(--border) 80%, var(--border) 90%, transparent 90%)',
+            }}
+          />
+        )}
       </div>
     </div>
+  );
+}
+
+function WindowCtrl({ title, onClick, isClose, children }: { title: string; onClick: () => void; isClose?: boolean; children: ReactNode }) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 46,
+        height: 32,
+        border: 'none',
+        background: 'none',
+        cursor: 'pointer',
+        color: isClose ? 'var(--muted-soft)' : 'var(--muted-soft)',
+        borderRadius: 0,
+        transition: 'background 0.1s, color 0.1s',
+      }}
+      onMouseEnter={(e) => {
+        if (isClose) {
+          (e.target as HTMLElement).style.background = 'var(--danger)';
+          (e.target as HTMLElement).style.color = '#fff';
+        } else {
+          (e.target as HTMLElement).style.background = 'var(--hover-bg)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        (e.target as HTMLElement).style.background = 'none';
+        (e.target as HTMLElement).style.color = 'var(--muted-soft)';
+      }}
+    >
+      {children}
+    </button>
   );
 }

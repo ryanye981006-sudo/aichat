@@ -12,13 +12,13 @@ export default function ThinkBlock({ content, children }: ThinkBlockProps) {
 
   return (
     <div className="rounded-xl border overflow-hidden" style={{
-      borderColor: 'var(--color-border)',
-      backgroundColor: 'var(--color-background-soft)',
+      borderColor: 'var(--border)',
+      backgroundColor: 'var(--sidebar-bg)',
     }}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors hover:opacity-80"
-        style={{ color: 'var(--color-text-2)' }}
+        style={{ color: 'var(--muted)' }}
       >
         <BrainCircuit className="w-4 h-4" />
         <span>深度思考过程</span>
@@ -26,7 +26,7 @@ export default function ThinkBlock({ content, children }: ThinkBlockProps) {
         {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
       </button>
       {expanded && (
-        <div className="px-4 pb-3 text-sm leading-relaxed" style={{ color: 'var(--color-text-2)' }}>
+        <div className="px-4 pb-3 text-sm leading-relaxed" style={{ color: 'var(--muted)' }}>
           {children || <span className="whitespace-pre-wrap">{content}</span>}
         </div>
       )}

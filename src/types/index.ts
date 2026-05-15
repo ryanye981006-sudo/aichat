@@ -138,6 +138,22 @@ export interface ToolCallEntry {
   completedAt?: string;
 }
 
+// 嵌入模型配置
+export interface EmbeddingConfig {
+  apiUrl: string;
+  apiKey: string;
+  apiKeyMasked: string;
+  modelName: string;
+}
+
+// 重排序模型配置
+export interface RerankerConfig {
+  apiUrl: string;
+  apiKey: string;
+  apiKeyMasked: string;
+  modelName: string;
+}
+
 // 工具调用展示块（前端渲染用，含展示配置）
 export interface ToolCallBlock {
   toolCallId: string;

@@ -85,15 +85,15 @@ function WebSearchDetail({ result }: { result: any }) {
   return (
     <div className="mt-2 space-y-1.5">
       {citations.map((c: any) => (
-        <div key={c.id || c.title} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
+        <div key={c.id || c.title} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'var(--border-soft)' }}>
           <div className="flex items-start gap-1.5">
-            <span className="flex-shrink-0 rounded-full w-4 h-4 inline-flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: '#16a34a' }}>{c.id || ''}</span>
+            <span className="flex-shrink-0 rounded-full w-4 h-4 inline-flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: 'var(--success)' }}>{c.id || ''}</span>
             <div className="flex-1 min-w-0">
-              <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline" style={{ color: 'var(--color-text)' }}>
+              <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-medium hover:underline" style={{ color: 'var(--fg)' }}>
                 {c.title}
               </a>
               {c.snippet && (
-                <p className="mt-0.5 leading-relaxed opacity-70" style={{ color: 'var(--color-text-2)' }}>
+                <p className="mt-0.5 leading-relaxed opacity-70" style={{ color: 'var(--muted)' }}>
                   {c.snippet.length > 200 ? c.snippet.slice(0, 200) + '...' : c.snippet}
                 </p>
               )}
@@ -118,10 +118,10 @@ function MemorySearchDetail({ result }: { result: any }) {
   return (
     <div className="mt-2 space-y-1.5">
       {memories.map((m: any, idx: number) => (
-        <div key={m.id || idx} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
-          <div className="font-medium" style={{ color: 'var(--color-text)' }}>{m.content || m.title || m.name}</div>
+        <div key={m.id || idx} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'var(--border-soft)' }}>
+          <div className="font-medium" style={{ color: 'var(--fg)' }}>{m.content || m.title || m.name}</div>
           {m.score !== undefined && (
-            <span className="text-[10px] opacity-50" style={{ color: 'var(--color-text-3)' }}>
+            <span className="text-[10px] opacity-50" style={{ color: 'var(--muted-soft)' }}>
               相似度: {(Number(m.score) * 100).toFixed(0)}%
             </span>
           )}
@@ -170,7 +170,7 @@ export default function ToolCallBlock({ toolCall, depth = 0 }: { toolCall: ToolC
             <span className="opacity-40 ml-2">{dur}</span>
           )}
           {hasDetail && (
-            <span className="inline-flex items-center ml-1.5" style={{ color: 'var(--color-primary)' }}>
+            <span className="inline-flex items-center ml-1.5" style={{ color: 'var(--accent)' }}>
               {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             </span>
           )}
@@ -183,11 +183,11 @@ export default function ToolCallBlock({ toolCall, depth = 0 }: { toolCall: ToolC
           {toolCall.toolName === 'web_search' && <WebSearchDetail result={toolCall.result} />}
           {toolCall.toolName === 'search_memory' && <MemorySearchDetail result={toolCall.result} />}
           {toolCall.toolName === 'web_fetch' && (
-            <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'rgba(0,0,0,0.03)' }}>
-              <div className="font-medium" style={{ color: 'var(--color-text)' }}>
+            <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'var(--border-soft)' }}>
+              <div className="font-medium" style={{ color: 'var(--fg)' }}>
                 {(toolCall.result as any)?.title || '网页'}
               </div>
-              <div className="mt-1 leading-relaxed whitespace-pre-wrap opacity-70 max-h-40 overflow-y-auto" style={{ color: 'var(--color-text-2)' }}>
+              <div className="mt-1 leading-relaxed whitespace-pre-wrap opacity-70 max-h-40 overflow-y-auto" style={{ color: 'var(--muted)' }}>
                 {typeof (toolCall.result as any)?.content === 'string' ? (toolCall.result as any).content.slice(0, 1000) : ''}
               </div>
             </div>

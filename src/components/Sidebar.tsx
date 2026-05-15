@@ -1,8 +1,31 @@
+// 侧边栏（v2 新设计）：助手下拉选择器 + 按助手分组的对话列表
 import type { Assistant, Conversation } from '../types';
 import { cn } from '../lib/utils';
-import { Plus, MoreHorizontal, MessageSquare, Settings, Brain, Pencil, Trash2, User, Monitor } from 'lucide-react';
+import { Plus, ChevronDown, Settings, MessageSquare, Trash2, Pencil } from 'lucide-react';
 import EmojiIcon from './shared/EmojiIcon';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+
+// ===== 时间格式化 =====
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr = Math.floor(diffMs / 3600000);
+  if (diffMin < 1) return '刚刚';
+  if (diffMin < 60) return `${diffMin}分钟前`;
+  if (diffHr < 24) return `${diffHr}小时前`;
+  if (diffHr < 48) return '昨天';
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}天前`;
+  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
+
+// ===== 分组对话类型 =====
+interface ConvGroup {
+  assistant: Assistant;
+  conversations: Conversation[];
+}
 
 interface SidebarProps {
   assistants: Assistant[];
@@ -16,363 +39,458 @@ interface SidebarProps {
   onEditAssistant: (assistant: Assistant) => void;
   onRemoveAssistant: (id: string) => void;
   onRemoveConversation: (id: string) => void;
-  isSettingsMode: boolean;
-  onToggleSettings: (enabled: boolean) => void;
-  settingsTab: 'model' | 'memory' | 'profile';
-  onSettingsTabChange: (tab: 'model' | 'memory' | 'profile') => void;
-  sidebarTab: 'assistants' | 'topics';
-  onSidebarTabChange: (tab: 'assistants' | 'topics') => void;
-  isWindowedPreview: boolean;
-  onToggleWindowedPreview: () => void;
+  onOpenSettings: () => void;
 }
 
 export default function Sidebar({
   assistants, conversations, currentAssistantId, currentConversationId,
   onSelectAssistant, onSelectConversation, onCreateAssistant, onCreateConversation,
-  onEditAssistant, onRemoveAssistant, onRemoveConversation, isSettingsMode, onToggleSettings, settingsTab, onSettingsTabChange,
-  sidebarTab, onSidebarTabChange, isWindowedPreview, onToggleWindowedPreview
+  onEditAssistant, onRemoveAssistant, onRemoveConversation, onOpenSettings,
 }: SidebarProps) {
 
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const buttonRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [gearMenuOpen, setGearMenuOpen] = useState(false);
   const [pendingDeleteConvId, setPendingDeleteConvId] = useState<string | null>(null);
   const [pendingDeleteAssistant, setPendingDeleteAssistant] = useState<Assistant | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const gearBtnRef = useRef<HTMLButtonElement>(null);
 
+  // 点击外部关闭下拉
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpenMenuId(null);
-        setMenuPosition(null);
+    if (!dropdownOpen) return;
+    const h = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
       }
     };
-    if (openMenuId) {
-      document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [openMenuId]);
+    setTimeout(() => document.addEventListener('mousedown', h), 0);
+    return () => document.removeEventListener('mousedown', h);
+  }, [dropdownOpen]);
 
-  const handleMenuToggle = (assistantId: string, buttonEl: HTMLButtonElement) => {
-    if (openMenuId === assistantId) {
-      setOpenMenuId(null);
-      setMenuPosition(null);
-    } else {
-      const rect = buttonEl.getBoundingClientRect();
-      // 向右下方展开：左上角对齐按钮的左下角
-      setMenuPosition({
-        top: rect.bottom + 4,
-        left: rect.right,
-      });
-      setOpenMenuId(assistantId);
-    }
-  };
+  // 点击外部关闭齿轮菜单
+  useEffect(() => {
+    if (!gearMenuOpen) return;
+    const h = (e: MouseEvent) => {
+      if (gearBtnRef.current && !gearBtnRef.current.contains(e.target as Node) &&
+          gearBtnRef.current.nextElementSibling && !gearBtnRef.current.nextElementSibling.contains(e.target as Node)) {
+        setGearMenuOpen(false);
+      }
+    };
+    setTimeout(() => document.addEventListener('mousedown', h), 0);
+    return () => document.removeEventListener('mousedown', h);
+  }, [gearMenuOpen]);
 
-  const handleDelete = (assistant: Assistant) => {
-    setOpenMenuId(null);
-    setMenuPosition(null);
-    setPendingDeleteAssistant(assistant);
-  };
+  const currentAssistant = assistants.find(a => a.id === currentAssistantId) || null;
 
-  const confirmDeleteAssistant = (confirmed: boolean) => {
-    if (confirmed && pendingDeleteAssistant) {
-      onRemoveAssistant(pendingDeleteAssistant.id);
-    }
-    setPendingDeleteAssistant(null);
-  };
+  // 对话按助手分组，按时间排序
+  const groups: ConvGroup[] = assistants
+    .map(a => ({
+      assistant: a,
+      conversations: conversations
+        .filter(c => c.assistant_id === a.id)
+        .sort((x, y) => new Date(y.updated_at).getTime() - new Date(x.updated_at).getTime()),
+    }))
+    .filter(g => g.conversations.length > 0);
 
-  const borderColor = 'var(--color-border)';
-  const bgSoft = 'var(--color-background-soft)';
-  const bgMute = 'var(--color-background-mute)';
-  const textColor = 'var(--color-text)';
-  const textSecondary = 'var(--color-text-2)';
-  const primaryColor = 'var(--color-primary)';
+  const empty = conversations.length === 0;
 
   return (
     <>
-    <div className="w-[280px] h-full flex flex-col shrink-0 border-r" style={{
-      backgroundColor: bgSoft,
-      borderColor,
-    }}>
-      {!isSettingsMode ? (
-        <>
-          {/* Tabs */}
-          <div className="flex px-3 pt-3 pb-0 shrink-0 gap-1">
-            <button
-              className={cn(
-                "flex-1 pb-2.5 text-sm font-medium transition-colors border-b-2",
-                sidebarTab === 'assistants' ? 'border-current' : 'border-transparent hover:opacity-80'
+      <div
+        className="w-[262px] h-full flex flex-col shrink-0 border-r select-none"
+        style={{
+          backgroundColor: 'var(--sidebar-bg)',
+          borderColor: 'var(--border)',
+        }}
+      >
+        {/* ===== 顶部：助手选择器 + 操作按钮 ===== */}
+        <div className="px-3 pt-4 pb-2 shrink-0">
+          <div className="flex items-center gap-1.5">
+            {/* 助手下拉 */}
+            <div ref={dropdownRef} style={{ position: 'relative', flex: 1 }}>
+              <button
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors text-left"
+                style={{
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--fg)',
+                  boxShadow: '0 1px 2px rgba(70, 85, 120, 0.04)',
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = 'var(--accent)';
+                  (e.currentTarget as HTMLElement).style.backgroundColor = '#fff';
+                  (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 4px rgba(85, 112, 184, 0.1)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)';
+                  (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--surface)';
+                  (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 2px rgba(70, 85, 120, 0.04)';
+                }}
+              >
+                <EmojiIcon emoji={currentAssistant?.emoji || '🤖'} size={22} fontSize={16} />
+                <span className="flex-1 text-sm font-medium truncate">
+                  {currentAssistant?.name || '选择助手'}
+                </span>
+                <ChevronDown
+                  className="w-[10px] h-[10px] shrink-0 transition-transform duration-200"
+                  style={{
+                    color: 'var(--muted)',
+                    transform: dropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                  }}
+                />
+              </button>
+
+              {dropdownOpen && (
+                <div
+                  className="absolute left-0 right-0 top-full mt-1 rounded-xl border py-1 z-50"
+                  style={{
+                    backgroundColor: 'var(--surface)',
+                    borderColor: 'var(--border)',
+                    boxShadow: 'var(--shadow-dropdown)',
+                  }}
+                >
+                  {assistants.map(a => (
+                    <div
+                      key={a.id}
+                      onClick={() => { onSelectAssistant(a.id); setDropdownOpen(false); }}
+                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors"
+                      style={{
+                        backgroundColor: currentAssistantId === a.id ? 'var(--accent-dim)' : 'transparent',
+                      }}
+                      onMouseEnter={e => {
+                        if (currentAssistantId !== a.id)
+                          (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)';
+                      }}
+                      onMouseLeave={e => {
+                        if (currentAssistantId !== a.id)
+                          (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <EmojiIcon emoji={a.emoji || '🤖'} size={24} fontSize={12} />
+                      <span className="flex-1 text-sm truncate" style={{ color: 'var(--fg)' }}>{a.name}</span>
+                    </div>
+                  ))}
+                </div>
               )}
-              style={{
-                color: sidebarTab === 'assistants' ? primaryColor : textSecondary,
-              }}
-              onClick={() => onSidebarTabChange('assistants')}
-            >
-              助手
-            </button>
-            <button
-              className={cn(
-                "flex-1 pb-2.5 text-sm font-medium transition-colors border-b-2",
-                sidebarTab === 'topics' ? 'border-current' : 'border-transparent hover:opacity-80'
+            </div>
+
+            {/* 齿轮按钮 — 操作当前助手 */}
+            <div style={{ position: 'relative' }}>
+              <button
+                ref={gearBtnRef}
+                onClick={() => setGearMenuOpen(!gearMenuOpen)}
+                className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors border shrink-0"
+                style={{
+                  borderColor: 'var(--border)',
+                  color: 'var(--muted)',
+                }}
+                title="助手操作"
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)';
+                  (e.currentTarget as HTMLElement).style.color = 'var(--accent)';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                  (e.currentTarget as HTMLElement).style.color = 'var(--muted)';
+                }}
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              {gearMenuOpen && (
+                <div
+                  className="absolute right-0 top-full mt-1 rounded-lg border py-1 z-50 min-w-[140px]"
+                  style={{
+                    backgroundColor: 'var(--surface)',
+                    borderColor: 'var(--border)',
+                    boxShadow: 'var(--shadow-dropdown)',
+                  }}
+                >
+                  <button
+                    onClick={() => { setGearMenuOpen(false); currentAssistant && onEditAssistant(currentAssistant); }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors"
+                    style={{ color: 'var(--fg)' }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent-dim)';
+                      (e.currentTarget as HTMLElement).style.color = 'var(--accent)';
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                      (e.currentTarget as HTMLElement).style.color = 'var(--fg)';
+                    }}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    编辑助手
+                  </button>
+                  <button
+                    onClick={() => { setGearMenuOpen(false); currentAssistant && setPendingDeleteAssistant(currentAssistant); }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm font-medium transition-colors"
+                    style={{ color: 'var(--danger)' }}
+                    onMouseEnter={e => {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(212,96,106,0.1)';
+                    }}
+                    onMouseLeave={e => {
+                      (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    删除助手
+                  </button>
+                </div>
               )}
+            </div>
+
+            {/* 新建助手按钮 */}
+            <button
+              onClick={onCreateAssistant}
+              className="w-8 h-8 flex items-center justify-center rounded-lg transition-colors border shrink-0"
               style={{
-                color: sidebarTab === 'topics' ? primaryColor : textSecondary,
+                borderColor: 'var(--border)',
+                background: 'linear-gradient(135deg, var(--accent), #6a82ce)',
+                color: '#fff',
+                boxShadow: 'var(--shadow-button)',
               }}
-              onClick={() => onSidebarTabChange('topics')}
+              title="新建助手"
+              onMouseEnter={e => {
+                (e.currentTarget as HTMLElement).style.opacity = '0.9';
+                (e.currentTarget as HTMLElement).style.transform = 'scale(1.04)';
+              }}
+              onMouseLeave={e => {
+                (e.currentTarget as HTMLElement).style.opacity = '1';
+                (e.currentTarget as HTMLElement).style.transform = 'scale(1)';
+              }}
             >
-              话题
+              <Plus className="w-4 h-4" />
             </button>
           </div>
+        </div>
 
-          <div className="flex-1 overflow-y-auto p-2">
-            {sidebarTab === 'assistants' ? (
-              <div>
-                <button
-                  onClick={onCreateAssistant}
-                  className="mb-2 w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-xl transition-colors"
-                  style={{ color: textSecondary }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = bgMute)}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <Plus className="w-4 h-4" />
-                  新建助手
-                </button>
-                {assistants.map(assistant => (
+        {/* ===== 中部：消息标签 + 新对话 ===== */}
+        <div className="px-3 py-1 shrink-0 flex items-center justify-between">
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase' as any,
+              color: 'var(--muted-soft)',
+            }}
+          >
+            消息
+          </span>
+          <button
+            onClick={onCreateConversation}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 'var(--radius-full)',
+              border: '1px dashed var(--accent)',
+              background: 'transparent',
+              color: 'var(--accent)',
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: 'pointer',
+              letterSpacing: '0.01em',
+            }}
+            title="新建对话"
+            onMouseEnter={e => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--accent-dim)';
+            }}
+            onMouseLeave={e => {
+              (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+            }}
+          >
+            + 新对话
+          </button>
+        </div>
+
+        {/* ===== 对话列表（按助手分组） ===== */}
+        <div className="flex-1 overflow-y-auto px-3 py-1">
+          {empty ? (
+            <div className="text-center text-sm py-8" style={{ color: 'var(--muted-soft)' }}>
+              选择助手开始对话
+            </div>
+          ) : (
+            groups.map(group => (
+              <div key={group.assistant.id} className="mb-3">
+                {/* 组眉：emoji + 助手名 */}
+                <div className="flex items-center gap-2 px-1 py-1 mb-0.5">
+                  <span style={{ fontSize: 10 }}>{group.assistant.emoji || '🤖'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', color: 'var(--muted-soft)', textTransform: 'uppercase' as any }}>
+                    {group.assistant.name}
+                  </span>
+                </div>
+                {/* 对话项 */}
+                {group.conversations.map(conv => (
                   <div
-                    key={assistant.id}
-                    onClick={() => onSelectAssistant(assistant.id)}
+                    key={conv.id}
+                    onClick={() => {
+                      onSelectConversation(conv.id);
+                      setPendingDeleteConvId(null);
+                    }}
                     className={cn(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors group mb-0.5"
+                      'flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-all mb-0.5 group/conv',
+                      currentConversationId === conv.id ? 'relative' : ''
                     )}
                     style={{
-                      backgroundColor: currentAssistantId === assistant.id ? bgMute : 'transparent',
+                      backgroundColor: currentConversationId === conv.id
+                        ? 'var(--active-bg)'
+                        : 'transparent',
                     }}
-                    onMouseEnter={e => { if (currentAssistantId !== assistant.id) e.currentTarget.style.backgroundColor = bgMute; }}
-                    onMouseLeave={e => { if (currentAssistantId !== assistant.id) e.currentTarget.style.backgroundColor = 'transparent'; }}
+                    onMouseEnter={e => {
+                      if (currentConversationId !== conv.id)
+                        (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)';
+                    }}
+                    onMouseLeave={e => {
+                      if (currentConversationId !== conv.id)
+                        (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+                    }}
                   >
-                    <EmojiIcon emoji={assistant.emoji || '🤖'} size={32} fontSize={16} />
-                    <div className="flex-1 overflow-hidden">
-                      <div className="text-sm font-medium truncate" style={{ color: textColor }}>
-                        {assistant.name}
-                      </div>
-                    </div>
-                    <button
-                      ref={el => { if (el) buttonRefs.current.set(assistant.id, el); else buttonRefs.current.delete(assistant.id); }}
-                      onClick={(e) => { e.stopPropagation(); handleMenuToggle(assistant.id, e.currentTarget); }}
-                      className={cn("p-1.5 rounded-lg transition-all hover:bg-black/10 shrink-0",
-                        openMenuId === assistant.id ? "opacity-100" : "opacity-0 group-hover:opacity-100")}
-                      style={{ color: textSecondary }}
+                    {/* active 态左侧指示条 */}
+                    {currentConversationId === conv.id && (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: 8,
+                          bottom: 8,
+                          width: 3,
+                          borderRadius: '0 2px 2px 0',
+                          backgroundColor: 'var(--accent)',
+                        }}
+                      />
+                    )}
+                    <MessageSquare
+                      className="w-4 h-4 shrink-0"
+                      style={{
+                        color: currentConversationId === conv.id
+                          ? 'var(--accent)'
+                          : 'var(--muted-soft)',
+                      }}
+                    />
+                    <span
+                      className="text-sm truncate flex-1"
+                      style={{
+                        color: currentConversationId === conv.id
+                          ? 'var(--accent)'
+                          : 'var(--fg)',
+                        fontWeight: currentConversationId === conv.id ? 500 : 400,
+                      }}
                     >
-                      <MoreHorizontal className="w-4 h-4" />
+                      {conv.title}
+                    </span>
+                    <span
+                      className="text-xs shrink-0 tabular-nums"
+                      style={{
+                        color: 'var(--muted-soft)',
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {fmtTime(conv.updated_at)}
+                    </span>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (pendingDeleteConvId === conv.id) {
+                          onRemoveConversation(conv.id);
+                          setPendingDeleteConvId(null);
+                        } else {
+                          setPendingDeleteConvId(conv.id);
+                        }
+                      }}
+                      className={cn(
+                        'p-1 rounded transition-all shrink-0',
+                        pendingDeleteConvId === conv.id
+                          ? 'opacity-100'
+                          : 'opacity-0 group-hover/conv:opacity-100'
+                      )}
+                      style={{
+                        color: pendingDeleteConvId === conv.id
+                          ? 'var(--danger)'
+                          : 'var(--muted-soft)',
+                        backgroundColor: pendingDeleteConvId === conv.id
+                          ? 'rgba(212, 96, 106, 0.1)'
+                          : 'transparent',
+                      }}
+                      title={pendingDeleteConvId === conv.id ? '再次点击确认删除' : '删除对话'}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div>
-                <button
-                  onClick={onCreateConversation}
-                  className="mb-2 w-full flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-xl transition-colors"
-                  style={{ color: textSecondary }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = bgMute)}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <Plus className="w-4 h-4" />
-                  新建话题
-                </button>
-                <div>
-                  {conversations.filter(c => c.assistant_id === currentAssistantId).length === 0 ? (
-                    <div className="text-center text-sm py-8" style={{ color: textSecondary }}>
-                      暂无话题，选择助手开始对话
-                    </div>
-                  ) : (
-                    conversations
-                      .filter(c => c.assistant_id === currentAssistantId)
-                      .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
-                      .map(conversation => (
-                        <div
-                          key={conversation.id}
-                          onClick={() => {
-                            onSelectConversation(conversation.id);
-                            setPendingDeleteConvId(null);
-                          }}
-                          className={cn(
-                            "flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-colors mb-0.5 group/conversation"
-                          )}
-                          style={{
-                            backgroundColor: currentConversationId === conversation.id ? bgMute : 'transparent',
-                            color: currentConversationId === conversation.id ? primaryColor : textColor,
-                          }}
-                          onMouseEnter={e => { if (currentConversationId !== conversation.id) e.currentTarget.style.backgroundColor = bgMute; }}
-                          onMouseLeave={e => { if (currentConversationId !== conversation.id) e.currentTarget.style.backgroundColor = 'transparent'; }}
-                        >
-                          <MessageSquare className="w-4 h-4 shrink-0" style={{ opacity: 0.6 }} />
-                          <div className="text-sm truncate flex-1">{conversation.title}</div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (pendingDeleteConvId === conversation.id) {
-                                onRemoveConversation(conversation.id);
-                                setPendingDeleteConvId(null);
-                              } else {
-                                setPendingDeleteConvId(conversation.id);
-                              }
-                            }}
-                            className={cn(
-                              "p-1 rounded transition-all opacity-0 group-hover/conversation:opacity-100",
-                              pendingDeleteConvId === conversation.id ? "opacity-100 bg-red-100" : "hover:bg-black/10"
-                            )}
-                            style={{ color: pendingDeleteConvId === conversation.id ? '#dc2626' : textSecondary }}
-                            title={pendingDeleteConvId === conversation.id ? '再次点击确认删除' : '删除话题'}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </>
-      ) : (
-        <div className="flex-1 flex flex-col p-3">
-          <div className="text-lg font-bold mb-5 px-2" style={{ color: textColor }}>系统设置</div>
-          <div className="space-y-1">
-            {([
-              { key: 'model' as const, icon: Settings, label: '模型设置' },
-              { key: 'memory' as const, icon: Brain, label: '全局记忆' },
-              { key: 'profile' as const, icon: User, label: '个人信息' },
-            ]).map(item => (
-              <button
-                key={item.key}
-                onClick={() => onSettingsTabChange(item.key)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors"
-                style={{
-                  backgroundColor: settingsTab === item.key ? 'var(--color-primary-mute)' : 'transparent',
-                  color: settingsTab === item.key ? primaryColor : textSecondary,
-                }}
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={() => onToggleSettings(false)}
-            className="mt-auto px-4 py-3 text-sm font-medium rounded-xl flex items-center gap-3 transition-colors border-t"
-            style={{ color: textSecondary, borderColor }}
-          >
-            退出设置
-          </button>
+            ))
+          )}
         </div>
-      )}
 
-      {!isSettingsMode && (
-        <div className="p-3 border-t space-y-1.5" style={{ borderColor }}>
+        {/* ===== 底部：设置按钮 ===== */}
+        <div className="p-3 border-t shrink-0" style={{ borderColor: 'var(--border)' }}>
           <button
-            onClick={onToggleWindowedPreview}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors"
-            style={{ color: textSecondary }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = bgMute)}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            <Monitor className="w-4 h-4" />
-            {isWindowedPreview ? '全屏预览' : '窗口预览'}
-          </button>
-          <button
-            onClick={() => onToggleSettings(true)}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors"
-            style={{ color: textSecondary, backgroundColor: bgMute }}
-            onMouseEnter={e => (e.currentTarget.style.opacity = '0.8')}
-            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
+            onClick={onOpenSettings}
+            className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-lg transition-colors border"
+            style={{
+              color: 'var(--muted)',
+              borderColor: 'var(--border)',
+              letterSpacing: '0.02em',
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.backgroundColor = 'var(--accent-dim)';
+              el.style.color = 'var(--accent)';
+              el.style.borderColor = 'var(--accent)';
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLElement;
+              el.style.backgroundColor = 'transparent';
+              el.style.color = 'var(--muted)';
+              el.style.borderColor = 'var(--border)';
+            }}
           >
             <Settings className="w-4 h-4" />
             设置
           </button>
         </div>
-      )}
-      {isSettingsMode && (
-        <div className="p-3 border-t" style={{ borderColor }}>
-          <button
-            onClick={onToggleWindowedPreview}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-xl transition-colors"
-            style={{ color: textSecondary }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = bgMute)}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            <Monitor className="w-4 h-4" />
-            {isWindowedPreview ? '全屏预览' : '窗口预览'}
-          </button>
-        </div>
-      )}
-    </div>
-
-    {/* 助手悬浮菜单 — 使用 fixed 定位避免被侧边栏 overflow 裁剪 */}
-    {openMenuId && menuPosition && (() => {
-      const assistant = assistants.find(a => a.id === openMenuId);
-      if (!assistant) return null;
-      return (
-        <div ref={menuRef} className="fixed w-36 rounded-xl border shadow-lg py-1 z-[9999]"
-          style={{
-            top: menuPosition.top,
-            left: menuPosition.left,
-            backgroundColor: 'var(--color-background)',
-            borderColor: 'var(--color-border)',
-          }}>
-          <button
-            onClick={(e) => { e.stopPropagation(); setOpenMenuId(null); setMenuPosition(null); onEditAssistant(assistant); }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-black/5 transition-colors"
-            style={{ color: textColor }}
-          >
-            <Pencil className="w-3.5 h-3.5" />
-            编辑助手
-          </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleDelete(assistant); }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-red-50 transition-colors"
-            style={{ color: '#dc2626' }}
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            删除助手
-          </button>
-        </div>
-      );
-    })()}
-
-    {/* 删除确认弹窗 — 自定义弹窗替代浏览器 confirm */}
-    {pendingDeleteAssistant && (
-      <div className="fixed inset-0 z-[10000] flex items-center justify-center" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-        onClick={() => confirmDeleteAssistant(false)}>
-        <div className="w-80 rounded-2xl shadow-2xl p-6"
-          style={{ backgroundColor: 'var(--color-background)' }}
-          onClick={e => e.stopPropagation()}>
-          <div className="text-lg font-bold mb-3" style={{ color: 'var(--color-text)' }}>
-            确认删除
-          </div>
-          <div className="text-sm mb-6" style={{ color: 'var(--color-text-2)' }}>
-            确定要删除助手「{pendingDeleteAssistant.name}」吗？此操作不可撤销。
-          </div>
-          <div className="flex gap-3 justify-end">
-            <button
-              onClick={() => confirmDeleteAssistant(false)}
-              className="px-5 py-2 rounded-lg text-sm font-medium border transition-colors"
-              style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-2)' }}
-            >
-              取消
-            </button>
-            <button
-              onClick={() => confirmDeleteAssistant(true)}
-              className="px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-              style={{ backgroundColor: '#dc2626' }}
-            >
-              删除
-            </button>
-          </div>
-        </div>
       </div>
-    )}
-  </>
+
+      {/* ===== 删除助手确认弹窗 ===== */}
+      {pendingDeleteAssistant && (
+        <div
+          className="fixed inset-0 z-[10000] flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(50, 58, 85, 0.4)', backdropFilter: 'blur(2px)' }}
+          onClick={() => setPendingDeleteAssistant(null)}
+        >
+          <div
+            className="w-80 rounded-2xl shadow-2xl p-6"
+            style={{ backgroundColor: 'var(--surface)', boxShadow: 'var(--shadow-modal)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-lg font-bold mb-3" style={{ color: 'var(--fg)' }}>
+              确认删除
+            </div>
+            <div className="text-sm mb-6" style={{ color: 'var(--muted)' }}>
+              确定要删除助手「{pendingDeleteAssistant.name}」吗？此操作不可撤销。
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setPendingDeleteAssistant(null)}
+                className="px-5 py-2 rounded-lg text-sm font-medium border transition-colors"
+                style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  onRemoveAssistant(pendingDeleteAssistant.id);
+                  setPendingDeleteAssistant(null);
+                }}
+                className="px-5 py-2 rounded-lg text-sm font-medium text-white transition-colors rounded-lg"
+                style={{ backgroundColor: 'var(--danger)' }}
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }

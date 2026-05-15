@@ -44,15 +44,15 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(50,58,85,0.4)' }}>
       <div className="rounded-2xl w-full max-w-[560px] shadow-2xl flex flex-col overflow-hidden"
-        style={{ backgroundColor: 'var(--color-background)', height: '520px' }}>
+        style={{ backgroundColor: 'var(--surface)', height: '520px' }}>
         {/* Header */}
         <div className="px-5 py-3.5 flex justify-between items-center border-b shrink-0"
-          style={{ borderColor: 'var(--color-border)' }}>
-          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>选择模型</h3>
+          style={{ borderColor: 'var(--border)' }}>
+          <h3 className="text-base font-bold" style={{ color: 'var(--fg)' }}>选择模型</h3>
           <button type="button" onClick={onClose}
-            className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--color-text-3)' }}>
+            className="text-2xl leading-none hover:opacity-70" style={{ color: 'var(--muted-soft)' }}>
             &times;
           </button>
         </div>
@@ -60,8 +60,8 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
         {/* Search */}
         <div className="px-5 py-3 shrink-0">
           <div className="flex items-center gap-2 px-3 py-2 rounded-xl border"
-            style={{ backgroundColor: 'var(--color-background-soft)', borderColor: 'var(--color-border)' }}>
-            <Search className="w-4 h-4 shrink-0" style={{ color: 'var(--color-text-3)' }} />
+            style={{ backgroundColor: 'var(--chat-bg)', borderColor: 'var(--border)' }}>
+            <Search className="w-4 h-4 shrink-0" style={{ color: 'var(--muted-soft)' }} />
             <input
               autoFocus
               type="text"
@@ -69,11 +69,11 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
               onChange={e => setSearch(e.target.value)}
               placeholder="搜索模型名称..."
               className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: 'var(--color-text)' }}
+              style={{ color: 'var(--fg)' }}
             />
             {search && (
               <button type="button" onClick={() => setSearch('')}
-                className="text-sm hover:opacity-70" style={{ color: 'var(--color-text-3)' }}>
+                className="text-sm hover:opacity-70" style={{ color: 'var(--muted-soft)' }}>
                 &times;
               </button>
             )}
@@ -83,14 +83,14 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
         {/* Model List — 固定高度，内部滚动 */}
         <div className="flex-1 overflow-y-auto px-5 pb-5">
           {grouped.length === 0 ? (
-            <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--color-text-3)' }}>
+            <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--muted-soft)' }}>
               未找到匹配的模型
             </div>
           ) : (
             <div className="space-y-4">
               {grouped.map(({ provider, models: groupModels }) => (
                 <div key={provider.id}>
-                  <div className="text-xs font-semibold px-1 py-1 mb-1.5 sticky top-0 z-10" style={{ color: 'var(--color-text-2)', backgroundColor: 'var(--color-background)' }}>
+                  <div className="text-xs font-semibold px-1 py-1 mb-1.5 sticky top-0 z-10" style={{ color: 'var(--muted)', backgroundColor: 'var(--surface)' }}>
                     {provider.name}
                   </div>
                   <div className="space-y-0.5">
@@ -107,12 +107,12 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
                           m.id === currentModelId ? "font-semibold" : ""
                         )}
                         style={{
-                          backgroundColor: m.id === currentModelId ? 'var(--color-primary-mute)' : 'transparent',
-                          color: 'var(--color-text)',
+                          backgroundColor: m.id === currentModelId ? 'var(--accent-dim)' : 'transparent',
+                          color: 'var(--fg)',
                         }}
                         onMouseEnter={e => {
                           if (m.id !== currentModelId) {
-                            (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--color-background-soft)';
+                            (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--chat-bg)';
                           }
                         }}
                         onMouseLeave={e => {
@@ -123,7 +123,7 @@ export default function ModelSelectModal({ isOpen, onClose, onSelect, providers,
                       >
                         <span>{m.display_name || m.name}</span>
                         {m.id === currentModelId && (
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--color-primary)' }} />
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--accent)' }} />
                         )}
                       </button>
                     ))}

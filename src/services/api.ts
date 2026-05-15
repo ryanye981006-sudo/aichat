@@ -80,6 +80,16 @@ export const profileApi = {
   remove: (key: string) => request<any>(`/profile/${key}`, { method: 'DELETE' }),
 };
 
+// ===== 工具设置 API =====
+export const toolsApi = {
+  getEmbeddingConfig: () => request<{ apiUrl: string; apiKey: string; apiKeyMasked: string; modelName: string }>('/tools/embedding-config'),
+  updateEmbeddingConfig: (data: { apiUrl: string; apiKey: string; modelName: string }) =>
+    request<{ success: boolean }>('/tools/embedding-config', { method: 'PUT', body: JSON.stringify(data) }),
+  getRerankerConfig: () => request<{ apiUrl: string; apiKey: string; apiKeyMasked: string; modelName: string }>('/tools/reranker-config'),
+  updateRerankerConfig: (data: { apiUrl: string; apiKey: string; modelName: string }) =>
+    request<{ success: boolean }>('/tools/reranker-config', { method: 'PUT', body: JSON.stringify(data) }),
+};
+
 // ===== 聊天文件上传 API =====
 // ===== 全局设置 API =====
 export const settingsApi = {

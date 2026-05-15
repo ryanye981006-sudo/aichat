@@ -23,9 +23,9 @@ export default function DeepThinkingButton({ mode, onChange, visible }: DeepThin
         enabled && 'ring-1'
       )}
       style={{
-        borderColor: enabled ? '#3b82f6' : 'var(--color-border)',
-        color: enabled ? '#3b82f6' : 'var(--color-text-2)',
-        backgroundColor: enabled ? 'rgba(59,130,246,0.08)' : 'transparent',
+        borderColor: enabled ? 'var(--accent)' : 'var(--border)',
+        color: enabled ? 'var(--accent)' : 'var(--muted)',
+        backgroundColor: enabled ? 'var(--accent-dim)' : 'transparent',
       }}
     >
       <BrainCircuit className="w-3 h-3" />

@@ -21,6 +21,8 @@
 
 /* 将自定义主题变量注册为 Tailwind 工具类 */
 @theme inline {
+  /* 旧版 */
+
   --color-background: var(--color-background);
   --color-background-soft: var(--color-background-soft);
   --color-background-mute: var(--color-background-mute);
@@ -40,6 +42,26 @@
   --color-link: var(--color-link);
   --color-hover: var(--color-hover);
   --color-active: var(--color-active);
+
+  /* 新版设计系统 */
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-chat-bg: var(--chat-bg);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-muted-soft: var(--muted-soft);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-dim: var(--accent-dim);
+  --color-accent-soft: var(--accent-soft);
+  --color-user-bubble: var(--user-bubble);
+  --color-ai-bubble: var(--ai-bubble);
+  --color-hover-bg: var(--hover-bg);
+  --color-active-bg: var(--active-bg);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
