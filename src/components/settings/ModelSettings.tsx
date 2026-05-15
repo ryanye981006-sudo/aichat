@@ -186,7 +186,7 @@ export default function ModelSettings() {
 
       {/* ===== 上半部：供应商选择区 ===== */}
       <div className="shrink-0" style={{ padding: '20px 24px 18px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
           <div className="relative flex-1">
             <Search className="absolute left-3 top-2.5 w-3.5 h-3.5" style={{ color: 'var(--muted)' }} />
             <input
@@ -211,13 +211,8 @@ export default function ModelSettings() {
           >
             <Plus className="w-3.5 h-3.5" /> 添加供应商
           </button>
-          <span style={{
-            fontSize: 10, fontWeight: 600, letterSpacing: '0.08em',
-            textTransform: 'uppercase', color: 'var(--muted-soft)',
-          }}>
-            供应商
-          </span>
         </div>
+        <div className="setting-group-label" style={{ marginBottom: 10 }}>供应商</div>
 
         {providers.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--muted-soft)', letterSpacing: '0.01em', padding: '14px 0' }}>
@@ -284,6 +279,10 @@ export default function ModelSettings() {
                 {selectedProvider.name}
               </h2>
               <div className="flex-1" />
+              <Toggle
+                checked={!!selectedProvider.enabled}
+                onChange={() => handleUpdateProvider(selectedProvider.id, { enabled: selectedProvider.enabled ? 0 : 1 })}
+              />
               {!selectedProvider.is_preset && (
                 <button onClick={() => setConfirmDeleteId(selectedProvider.id)}
                   className="p-1.5 rounded-lg transition-colors" title="删除供应商"
@@ -292,10 +291,6 @@ export default function ModelSettings() {
                   <Trash2 className="w-4 h-4" style={{ color: 'var(--danger)' }} />
                 </button>
               )}
-              <Toggle
-                checked={!!selectedProvider.enabled}
-                onChange={() => handleUpdateProvider(selectedProvider.id, { enabled: selectedProvider.enabled ? 0 : 1 })}
-              />
             </div>
 
             <div className="space-y-6">
