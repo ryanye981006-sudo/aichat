@@ -1,5 +1,5 @@
 // 桌面窗口框架 — 模拟标题栏 + 窗口控件 + 全屏/小窗切换
-import { ReactNode, useState, useCallback, useEffect } from 'react';
+import { ReactNode, useState, useCallback, useEffect, useRef } from 'react';
 
 interface WindowFrameProps {
   showWindowFrame: boolean;
@@ -8,10 +8,43 @@ interface WindowFrameProps {
   children: ReactNode;
 }
 
+// 根据容器宽度计算侧边栏宽度
+function sidebarWidthFor(containerWidth: number): string {
+  if (containerWidth > 1400) return 'var(--sidebar-w-wide)';
+  if (containerWidth >= 1100) return 'var(--sidebar-w-normal)';
+  return 'var(--sidebar-w-compact)';
+}
+
 export default function WindowFrame({ showWindowFrame, onToggleWindowed, isWindowed, children }: WindowFrameProps) {
   const [transitioning, setTransitioning] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
   useEffect(() => { setMounted(true); }, []);
+
+  // 监听容器宽度变化，动态更新 --sidebar-w CSS 变量
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el && showWindowFrame) return;
+
+    const apply = (width: number) => {
+      document.documentElement.style.setProperty('--sidebar-w', sidebarWidthFor(width));
+    };
+
+    if (showWindowFrame && el) {
+      const observer = new ResizeObserver(([entry]) => {
+        apply(entry.contentRect.width);
+      });
+      observer.observe(el);
+      apply(el.getBoundingClientRect().width);
+      return () => observer.disconnect();
+    }
+
+    // 无窗口框架时，监听窗口尺寸
+    const onResize = () => apply(window.innerWidth);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [showWindowFrame, isWindowed]);
 
   const handleToggle = useCallback(() => {
     if (transitioning) return;
@@ -37,6 +70,7 @@ export default function WindowFrame({ showWindowFrame, onToggleWindowed, isWindo
       }}
     >
       <div
+        ref={containerRef}
         style={{
           display: 'flex',
           flexDirection: 'column',

@@ -97,8 +97,10 @@ export default function Sidebar({
   return (
     <>
       <div
-        className="w-[262px] h-full flex flex-col shrink-0 border-r select-none"
+        className="h-full flex flex-col shrink-0 border-r select-none"
         style={{
+          width: 'var(--sidebar-w)',
+          transition: 'width 0.3s var(--ease-out-standard)',
           backgroundColor: 'var(--sidebar-bg)',
           borderColor: 'var(--border)',
         }}

@@ -54,8 +54,10 @@
   --radius-full: 9999px;
 
   /* ===== 布局尺寸 ===== */
-  --sidebar-w: 262px;
-  --sidebar-w-mini: 212px;
+  --sidebar-w-compact: 200px;   /* 窗口宽度 900-1100px */
+  --sidebar-w-normal: 240px;    /* 窗口宽度 1100-1400px */
+  --sidebar-w-wide:   280px;    /* 窗口宽度 >1400px */
+  --sidebar-w: var(--sidebar-w-normal);  /* 当前生效宽度，由 ResizeObserver 动态设置 */
   --titlebar-h: 42px;
 
   /* ===== 阴影层级 ===== */
