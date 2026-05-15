@@ -174,51 +174,33 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
 
       {/* 联网搜索 Key */}
       <SettingBlock label="联网搜索 Key" desc="阿里云 IQS API Key，用于联网搜索功能">
-        {iqsConfigured && !iqsKeyInput ? (
-          <div className="flex items-center gap-3" style={{ marginTop: 8 }}>
-            <div className="flex items-center gap-2 relative flex-1 rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
-              <input
-                type="password"
-                value={iqsKeyMasked}
-                readOnly
-                className="flex-1 px-4 py-2.5 border-none outline-none bg-transparent"
-                style={{ color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-mono)' }}
-              />
-              <button type="button" onClick={() => { setIqsKeyInput(''); setShowIqsKey(false); }}
-                className="px-4 border-l text-sm font-medium transition-colors h-full"
-                style={{ borderColor: 'var(--border)', color: 'var(--muted)' }}
-                onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
-                onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
-                修改
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)', marginTop: 8 }}>
-            <div className="relative flex-1">
-              <input
-                type={showIqsKey ? 'text' : 'password'}
-                value={iqsKeyInput}
-                onChange={e => handleIqsKeyChange(e.target.value)}
-                placeholder="输入 IQS API Key..."
-                className="w-full px-4 py-2.5 border-none outline-none bg-transparent"
-                style={{ fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--fg)' }}
-              />
-              <button type="button" onClick={() => setShowIqsKey(!showIqsKey)} className="absolute right-3 top-2.5" style={{ color: 'var(--muted)' }}>
-                {showIqsKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <button type="button" onClick={handleTestIqsKey} disabled={iqsTesting}
-              className="px-4 border-l text-sm font-medium transition-colors"
-              style={{ borderColor: 'var(--border)', color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-body)' }}
-              onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
-              onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
-              {iqsTesting ? '测试中...' : '测试'}
+        {iqsConfigured && !iqsKeyInput && (
+          <p style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)', marginBottom: 8 }}>已配置 ({iqsKeyMasked})</p>
+        )}
+        <div className="flex rounded-lg border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
+          <div className="relative flex-1">
+            <input
+              type={showIqsKey ? 'text' : 'password'}
+              value={iqsKeyInput}
+              onChange={e => handleIqsKeyChange(e.target.value)}
+              placeholder="sk-..."
+              className="w-full px-4 py-2.5 border-none outline-none bg-transparent"
+              style={{ fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--fg)' }}
+            />
+            <button type="button" onClick={() => setShowIqsKey(!showIqsKey)} className="absolute right-3 top-2.5" style={{ color: 'var(--muted)' }}>
+              {showIqsKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
-        )}
+          <button type="button" onClick={handleTestIqsKey} disabled={iqsTesting}
+            className="px-4 border-l font-medium transition-colors"
+            style={{ borderColor: 'var(--border)', color: 'var(--muted)', fontSize: 13, fontFamily: 'var(--font-body)' }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent'}>
+            {iqsTesting ? '测试中...' : '测试'}
+          </button>
+        </div>
         {iqsTestResult && (
-          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12 }}>
+          <div className="flex items-center gap-2 mt-2" style={{ fontSize: 12, fontFamily: 'var(--font-body)' }}>
             {iqsTestResult.success ? (
               <>
                 <CheckCircle className="w-4 h-4" style={{ color: 'var(--success)' }} />
