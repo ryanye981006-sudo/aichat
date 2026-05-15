@@ -20,7 +20,7 @@ const NAV_ITEMS: { key: SettingsTab; label: string; icon: string }[] = [
 export default function SettingsShell({ activeTab, onTabChange, onClose, children }: SettingsShellProps) {
   return (
     <div
-      className="fixed inset-0 z-40 flex"
+      className="absolute inset-0 z-40 flex"
       style={{
         backgroundColor: 'var(--bg)',
       }}
