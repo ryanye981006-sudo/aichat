@@ -67,7 +67,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-6 space-y-10">
+    <div className="w-full py-8 px-6 space-y-10">
       <PageTitle icon="🧠" title="长期记忆" desc="管理全局记忆开关与您的个人背景信息" />
 
       {/* 记忆开关 + 统计 */}

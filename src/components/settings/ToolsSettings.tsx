@@ -109,7 +109,7 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-8 px-6 space-y-10">
+    <div className="w-full py-8 px-6 space-y-10">
       <PageTitle icon="🔧" title="工具设置" desc="配置记忆提取、向量检索与联网搜索所需的模型与密钥" />
 
       {/* 记忆提取 LLM */}
