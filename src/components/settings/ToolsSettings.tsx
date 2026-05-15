@@ -110,7 +110,7 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
 
   return (
     <div className="w-full py-8 px-6 space-y-10">
-      <PageTitle icon="🔧" title="工具设置" desc="配置记忆提取、向量检索与联网搜索所需的模型与密钥" />
+      <PageTitle title="工具设置" desc="配置记忆提取、向量检索与联网搜索所需的模型与密钥" />
 
       {/* 记忆提取 LLM */}
       <Section title="记忆提取 LLM 模型">
@@ -221,11 +221,10 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
 
 // ===== 内联组件 =====
 
-function PageTitle({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+function PageTitle({ title, desc }: { title: string; desc: string }) {
   return (
     <div>
-      <h2 className="flex items-center gap-2 text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
-        <span>{icon}</span>
+      <h2 className="text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
         {title}
       </h2>
       <p className="mt-1" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>{desc}</p>

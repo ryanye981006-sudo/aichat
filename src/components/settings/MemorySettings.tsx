@@ -68,7 +68,7 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
 
   return (
     <div className="w-full py-8 px-6 space-y-10">
-      <PageTitle icon="🧠" title="长期记忆" desc="管理全局记忆开关与您的个人背景信息" />
+      <PageTitle title="长期记忆" desc="管理全局记忆开关与您的个人背景信息" />
 
       {/* 记忆开关 + 统计 */}
       <div className="rounded-xl border p-5 space-y-4" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--surface)' }}>
@@ -162,11 +162,10 @@ export default function MemorySettings({ providers, models }: MemorySettingsProp
 
 // ===== 内联组件 =====
 
-function PageTitle({ icon, title, desc }: { icon: string; title: string; desc: string }) {
+function PageTitle({ title, desc }: { title: string; desc: string }) {
   return (
     <div>
-      <h2 className="flex items-center gap-2 text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
-        <span>{icon}</span>
+      <h2 className="text-lg font-semibold" style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}>
         {title}
       </h2>
       <p className="mt-1" style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)' }}>{desc}</p>
