@@ -15,6 +15,7 @@ import memoryRouter from './routes/memory.js';
 import profileRouter from './routes/profile.js';
 import settingsRouter from './routes/settings.js';
 import toolsRouter from './routes/tools.js';
+import petsRouter from './routes/pets.js';
 import { conversationIdleDetector } from './services/ConversationIdleDetector.js';
 import { webSearchService } from './services/WebSearchService.js';
 
@@ -47,6 +48,7 @@ app.use('/api/memory', memoryRouter);
 app.use('/api/profile', profileRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/tools', toolsRouter);
+app.use('/api/pets', petsRouter);
 
 // 健康检查
 app.get('/api/health', (_req, res) => {

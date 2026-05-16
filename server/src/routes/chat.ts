@@ -12,6 +12,7 @@ import { webSearchService } from '../services/WebSearchService.js';
 import { upload } from '../services/FileStorage.js';
 import { cleanText } from '../utils/cleanText.js';
 import { config } from '../config.js';
+import { emitUserInputStart, emitAiThinkingStart, emitResponseStart, emitResponseComplete, emitError } from '../services/PetEventBus.js';
 
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
@@ -155,6 +156,9 @@ router.post('/completions', async (req: Request, res: Response) => {
 
   sendSSE({ type: 'meta', conversation_id: activeConvId, citations: [] });
 
+  // 桌宠事件：用户输入已处理
+  emitUserInputStart(activeConvId, assistant.name, message.length);
+
   const chatMessages = [
     { role: 'system' as const, content: systemContent },
     ...historySlice
@@ -216,6 +220,9 @@ router.post('/completions', async (req: Request, res: Response) => {
   const tLlmStart = Date.now();
   let firstTokenLogged = false;
 
+  // 桌宠事件：AI 开始推理
+  emitAiThinkingStart(activeConvId);
+
   // 调用 LLM 流式（传入 abortSignal 以支持中止，传入 tools 支持记忆检索）
   await aiService.chatStream(
     chatMessages,
@@ -227,6 +234,8 @@ router.post('/completions', async (req: Request, res: Response) => {
         if (!firstTokenLogged) {
           firstTokenLogged = true;
           console.log(`[Chat] 首字到达 | 总TTFT ${Date.now() - requestStartTime}ms | LLM首字 ${Date.now() - tLlmStart}ms`);
+          // 桌宠事件：流式输出开始
+          emitResponseStart(activeConvId);
         }
         fullRawContent += token;
         sendSSE({ type: 'token', content: token });
@@ -285,8 +294,12 @@ router.post('/completions', async (req: Request, res: Response) => {
         // 更新对话时间
         db.prepare("UPDATE conversations SET updated_at = datetime('now') WHERE id = ?").run(activeConvId);
 
-        // 发送完成事件（含计时明细用于调试）
+        // 桌宠事件：回复完成
         const totalMs = Date.now() - requestStartTime;
+        const totalTokens = (metrics?.promptTokens || 0) + (metrics?.completionTokens || 0);
+        emitResponseComplete(activeConvId, totalTokens, totalMs);
+
+        // 发送完成事件（含计时明细用于调试）
         sendSSE({
           type: 'done',
           message_id: aiMsgId,
@@ -315,6 +328,7 @@ router.post('/completions', async (req: Request, res: Response) => {
         }
       },
       onError(error: Error) {
+        emitError(activeConvId, error.message);
         sendSSE({ type: 'error', message: error.message });
         endResponse();
       },

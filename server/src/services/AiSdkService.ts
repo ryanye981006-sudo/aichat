@@ -2,6 +2,7 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { streamText as _streamText, generateText as _generateText, stepCountIs } from 'ai'
 import { getDb } from '../db/connection.js'
+import { emitToolCallStart, emitToolCallEnd } from './PetEventBus.js'
 
 // 缓存 provider SDK 实例，避免每次请求重新创建连接
 const modelCache = new Map<string, any>()
@@ -222,11 +223,13 @@ export class AiSdkService {
               args = {}
             }
             toolArgsAccumulator.clear()
+            emitToolCallStart('unknown', part.toolName);
             callbacks.onToolCall?.(toolCallId, part.toolName, args)
             break
           }
           case 'tool-result': {
             const p = part as any
+            emitToolCallEnd('unknown', p.toolName);
             callbacks.onToolResult?.(p.toolCallId, p.toolName, p.output)
             break
           }

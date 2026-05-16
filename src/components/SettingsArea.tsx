@@ -6,6 +6,7 @@ import SettingsShell, { type SettingsTab } from './settings/SettingsShell';
 import ModelSettings from './settings/ModelSettings';
 import MemorySettings from './settings/MemorySettings';
 import ToolsSettings from './settings/ToolsSettings';
+import PetSettings from './settings/PetSettings';
 
 interface SettingsAreaProps {
   activeTab: SettingsTab;
@@ -33,6 +34,8 @@ export default function SettingsArea({ activeTab, onClose }: SettingsAreaProps) 
         return <MemorySettings />;
       case 'tools':
         return <ToolsSettings providers={providers} models={models} />;
+      case 'pet':
+        return <PetSettings />;
     }
   };
 

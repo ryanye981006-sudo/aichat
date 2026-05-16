@@ -1,9 +1,43 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // ---- 现有通道 ----
   isElectron: true,
   toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
   onFullscreenChange: (callback) => {
     ipcRenderer.on('fullscreen-changed', (_event, isFullscreen) => callback(isFullscreen));
   },
+
+  // ---- 宠物管理（主窗口使用） ---
+  petActivate: (petData) => ipcRenderer.send('pet:activate', petData),
+  petDeactivate: () => ipcRenderer.send('pet:deactivate'),
+  petUpdateConfig: (config) => ipcRenderer.send('pet:update-config', config),
+  petImportFromURL: (url) => ipcRenderer.invoke('pet:import-url', url),
+  petListInstalled: () => ipcRenderer.invoke('pet:list-installed'),
+  petImportLocal: (sourceDir) => ipcRenderer.invoke('pet:import-local', sourceDir),
+
+  // ---- 宠物状态事件（宠物渲染进程使用） ----
+  onPetEvent: (callback) => {
+    ipcRenderer.on('pet:event', (_event, data) => callback(data));
+  },
+  onPetLoad: (callback) => {
+    ipcRenderer.on('pet:load', (_event, data) => callback(data));
+  },
+  onPetConfigUpdate: (callback) => {
+    ipcRenderer.on('pet:update-config', (_event, config) => callback(config));
+  },
+  onPetPauseRender: (callback) => {
+    ipcRenderer.on('pet:pause-render', () => callback());
+  },
+  onPetResumeRender: (callback) => {
+    ipcRenderer.on('pet:resume-render', () => callback());
+  },
+  onPetEnableTransparent: (callback) => {
+    ipcRenderer.on('pet:enable-transparent', () => callback());
+  },
+
+  // ---- 宠物交互（宠物渲染进程 → 主进程） ----
+  sendPetAction: (action) => ipcRenderer.send('pet:action', action),
+  sendDragStart: () => ipcRenderer.send('pet:drag-start'),
+  sendDragEnd: () => ipcRenderer.send('pet:drag-end'),
 });

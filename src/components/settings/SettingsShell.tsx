@@ -2,7 +2,7 @@
 import { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 
-export type SettingsTab = 'model' | 'memory' | 'tools';
+export type SettingsTab = 'model' | 'memory' | 'tools' | 'pet';
 
 interface SettingsShellProps {
   activeTab: SettingsTab;
@@ -15,6 +15,7 @@ const NAV_ITEMS: { key: SettingsTab; label: string }[] = [
   { key: 'model', label: '模型设置' },
   { key: 'memory', label: '长期记忆' },
   { key: 'tools', label: '工具设置' },
+  { key: 'pet', label: '桌宠管理' },
 ];
 
 export default function SettingsShell({ activeTab, onTabChange, onClose, children }: SettingsShellProps) {

@@ -1,22 +1,14 @@
-// 注意：main.ts 仅用于参考，实际由 main.mjs 运行
-// main.mjs 使用 createRequire 加载 electron 模块（ESM/CommonJS 兼容）
-import { app, BrowserWindow, globalShortcut, ipcMain, screen } from 'electron';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { spawn, ChildProcess } from 'child_process';
-import fs from 'fs';
-import type { createPetWindow, updatePetWindow, sendPetEvent, loadConfig, saveConfig } from './pet-window.mjs';
-import type { startFullscreenDetection, stopFullscreenDetection } from './fullscreen-detector.mjs';
+const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const path = require('path');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const { createPetWindow, updatePetWindow, sendPetEvent, loadConfig, saveConfig } = require('./pet-window.cjs');
+const { startFullscreenDetection, stopFullscreenDetection } = require('./fullscreen-detector.cjs');
 
-// 运行时使用 createRequire（见 main.mjs）
-const _petModule = './pet-window.mjs';
-const _fsModule = './fullscreen-detector.mjs';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 
-let mainWindow: BrowserWindow | null = null;
-let petWindow: BrowserWindow | null = null;
+let mainWindow = null;
+let petWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -48,9 +40,9 @@ function createWindow() {
 
   // 允许关闭到系统托盘（仅隐藏主窗口，宠物继续显示）
   mainWindow.on('close', (event) => {
-    if (!(app as any).isQuitting) {
+    if (!app.isQuitting) {
       event.preventDefault();
-      mainWindow?.hide();
+      mainWindow.hide();
     }
   });
 }
@@ -65,16 +57,14 @@ function registerShortcuts() {
 
 // 启动 Express 后端
 function startServer() {
-  let child: ChildProcess;
+  let child;
 
   if (isDev) {
-    // 开发模式：用 npx tsx 运行 TS 源码
     child = spawn('npx', ['tsx', path.join(__dirname, '../server/src/index.ts')], {
       env: { ...process.env },
       stdio: 'pipe',
     });
   } else {
-    // 生产模式：用内嵌的便携 Node.js 运行编译后的 server-dist
     const nodeExe = path.join(process.resourcesPath, 'node.exe');
     const serverEntry = path.join(process.resourcesPath, 'server-dist', 'src', 'index.js');
 
@@ -93,8 +83,7 @@ function startServer() {
     });
   }
 
-  // 解析 stdout 中的 JSON 事件（PET_EVENT: 前缀标记），其余照旧打印
-  child.stdout?.on('data', (data: Buffer) => {
+  child.stdout?.on('data', (data) => {
     const lines = data.toString().trim().split('\n');
     for (const line of lines) {
       if (line.startsWith('PET_EVENT:')) {
@@ -112,10 +101,10 @@ function startServer() {
     }
   });
 
-  child.stderr?.on('data', (data: Buffer) => {
+  child.stderr?.on('data', (data) => {
     console.error(`[Server] ${data.toString().trim()}`);
   });
-  child.on('exit', (code: number | null) => {
+  child.on('exit', (code) => {
     console.log(`[Server] 进程退出，退出码: ${code}`);
   });
 }
@@ -132,30 +121,20 @@ app.whenReady().then(() => {
 
   // ---- 宠物管理 IPC ----
 
-  // 激活宠物（创建或更新悬浮窗）
   ipcMain.on('pet:activate', (_event, petData) => {
-    // 如果已有宠物窗口，先关闭
     if (petWindow && !petWindow.isDestroyed()) {
       petWindow.close();
     }
-    // 创建新宠物窗口
-    petWindow = createPetWindow(mainWindow!);
-
-    // 保存默认宠物 ID
+    petWindow = createPetWindow(mainWindow);
     const config = loadConfig();
     config.defaultPetId = petData.id;
     saveConfig(config);
-
-    // 通知渲染进程加载这只宠物
     petWindow.webContents.on('did-finish-load', () => {
-      petWindow!.webContents.send('pet:load', petData);
+      petWindow.webContents.send('pet:load', petData);
     });
-
-    // 启动全屏检测
-    startFullscreenDetection(mainWindow!, petWindow);
+    startFullscreenDetection(mainWindow, petWindow);
   });
 
-  // 停用宠物
   ipcMain.on('pet:deactivate', () => {
     if (petWindow && !petWindow.isDestroyed()) {
       stopFullscreenDetection();
@@ -167,12 +146,10 @@ app.whenReady().then(() => {
     saveConfig(config);
   });
 
-  // 更新宠物配置（缩放/位置）
   ipcMain.on('pet:update-config', (_event, config) => {
-    updatePetWindow(petWindow!, config);
+    updatePetWindow(petWindow, config);
   });
 
-  // 从 URL 导入宠物
   ipcMain.handle('pet:import-url', async (_event, url) => {
     try {
       const response = await fetch(url);
@@ -181,19 +158,21 @@ app.whenReady().then(() => {
       }
       const data = await response.json();
       return { success: true, data };
-    } catch (err: any) {
+    } catch (err) {
       return { success: false, error: err.message };
     }
   });
 
-  // 扫描已安装宠物列表
   ipcMain.handle('pet:list-installed', async () => {
     const home = process.env.USERPROFILE || process.env.HOME || '~';
     const petsDir = path.join(home, '.aichat', 'pets');
+    console.log('[Pet] 扫描宠物目录:', petsDir);
     if (!fs.existsSync(petsDir)) {
+      console.log('[Pet] 目录不存在:', petsDir);
       return [];
     }
     const entries = fs.readdirSync(petsDir, { withFileTypes: true });
+    console.log('[Pet] 目录条目:', entries.length);
     const pets = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -201,6 +180,7 @@ app.whenReady().then(() => {
       if (!fs.existsSync(manifestPath)) continue;
       try {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        console.log('[Pet] 发现宠物:', entry.name, manifest.displayName);
         pets.push({
           id: entry.name,
           name: manifest.displayName || manifest.name,
@@ -208,14 +188,14 @@ app.whenReady().then(() => {
           version: manifest.version || '1.0.0',
           installedAt: fs.statSync(manifestPath).mtime.toISOString(),
         });
-      } catch {
-        // 跳过损坏的
+      } catch (err) {
+        console.log('[Pet] 跳过损坏宠物:', entry.name, err.message);
       }
     }
-    return pets.sort((a: any, b: any) => a.name.localeCompare(b.name));
+    console.log('[Pet] 返回宠物列表:', pets.length);
+    return pets.sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  // 从本地文件导入宠物
   ipcMain.handle('pet:import-local', async (_event, sourceDir) => {
     const home = process.env.USERPROFILE || process.env.HOME || '~';
     const petsDir = path.join(home, '.aichat', 'pets');
@@ -242,7 +222,6 @@ app.whenReady().then(() => {
     };
   });
 
-  // ---- 宠物交互 IPC（宠物窗口 → 主进程） ----
   ipcMain.on('pet:action', (_event, action) => {
     if (action.type === 'double-click') {
       if (mainWindow) {
@@ -254,24 +233,29 @@ app.whenReady().then(() => {
   });
 
   startServer();
-  // 给服务端一点启动时间
   setTimeout(createWindow, 2000);
 
-  // 启动时自动唤醒宠物
   const config = loadConfig();
   if (config.autoWakeOnStartup && config.defaultPetId) {
     setTimeout(() => {
-      petWindow = createPetWindow(mainWindow!);
-      if (petWindow) {
-        startFullscreenDetection(mainWindow!, petWindow);
+      try {
+        console.log('[Pet] 自动唤醒宠物:', config.defaultPetId);
+        petWindow = createPetWindow(mainWindow);
+        if (petWindow) {
+          console.log('[Pet] 宠物窗口已创建');
+          startFullscreenDetection(mainWindow, petWindow);
+        }
+      } catch (err) {
+        console.error('[Pet] 创建宠物窗口失败:', err.message);
       }
     }, 3000);
+  } else {
+    console.log('[Pet] 跳过自动唤醒 (autoWake=%s, defaultPetId=%s)', config.autoWakeOnStartup, config.defaultPetId);
   }
 });
 
-// 确保彻底退出时清理
 app.on('before-quit', () => {
-  (app as any).isQuitting = true;
+  app.isQuitting = true;
 });
 
 app.on('window-all-closed', () => {
