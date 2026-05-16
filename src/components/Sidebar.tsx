@@ -120,11 +120,11 @@ export default function Sidebar({
       </div>
 
       {/* ===== 中部：会话列表（可滚动） ===== */}
-      <div className="flex-1 overflow-y-auto px-3 py-1">
+      <div className="flex-1 overflow-y-auto px-3 py-1 flex flex-col">
         {empty ? (
-          <div className="text-center text-sm py-10" style={{ color: 'var(--muted-soft)' }}>
+          <div className="flex-1 flex flex-col items-center justify-center text-sm -mt-10" style={{ color: 'var(--muted-soft)' }}>
             <div className="mb-2 opacity-40">
-              <MessageSquare className="w-10 h-10 mx-auto" />
+              <MessageSquare className="w-10 h-10" />
             </div>
             <div>暂无历史对话</div>
             <div className="text-xs mt-1 opacity-60">点击上方「开始新对话」发起聊天</div>
