@@ -58,14 +58,13 @@ export default function PetSettings() {
   }
 
   async function activatePet(pet: InstalledPet) {
-    const api = eApi();
-    if (!api) return;
+    // 切换选中状态（浏览器模式下仅本地 UI 状态）
     if (activePetId === pet.id) {
-      api.petDeactivate();
       setActivePetId(null);
+      eApi()?.petDeactivate();
     } else {
-      api.petActivate({ id: pet.id, name: pet.name, path: getPetPath(pet.id), zoom });
       setActivePetId(pet.id);
+      eApi()?.petActivate({ id: pet.id, name: pet.name, path: getPetPath(pet.id), zoom });
     }
   }
 

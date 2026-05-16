@@ -7,6 +7,7 @@ import WindowFrame from './components/WindowFrame';
 import type { Assistant, Provider, Model, Conversation, Message, ConversationUIState } from './types';
 import { assistantsApi, conversationsApi, messagesApi, providersApi, modelsApi, chatSSE, regenerateSSE } from './services/api';
 import { generateId } from './lib/utils';
+import { createStreamCallbacks } from './lib/streamCallbacks';
 
 export default function App() {
   // ===== 核心状态 =====
@@ -371,191 +372,33 @@ export default function App() {
       }).catch(() => {});
     }
 
-    let fullRawContent = '';
-    let currentReasoning = '';
-    let reasoningSegments: any[] = [];
+    const state = { fullRawContent: '', currentReasoning: '', reasoningSegments: [] as any[] };
+    const activeConvRef = { current: activeConvId };
+
+    const ctx = {
+      messagesCacheRef, currentConversationIdRef, abortControllersRef,
+      setMessages, setIsStreaming, setStreamingConversationId, setAbortController,
+    };
+
+    const callbacks = createStreamCallbacks(aiMsg.id, activeConvRef, state, ctx, {
+      enableGhostFilter: true,
+      onAfterDone: () => { if (currentAssistantId) loadConversations(currentAssistantId); },
+    });
 
     const controller = chatSSE(currentAssistantId, content, activeConvId, thinkingMode, {
+      ...callbacks,
       onMeta(convId) {
-        // 仅当用户仍在当前会话时才更新会话 ID（避免切走后 meta 事件切换回旧会话）
-        if (convId !== activeConvId) {
-          if (activeConvId === currentConversationIdRef.current) {
+        if (convId !== activeConvRef.current) {
+          if (activeConvRef.current === currentConversationIdRef.current) {
             setCurrentConversationId(convId);
-            activeConvId = convId;
+            activeConvRef.current = convId;
             setStreamingConversationId(convId);
             currentConversationIdRef.current = convId;
           }
         }
       },
-      onToken(token) {
-        fullRawContent += token;
-        // 同步更新缓存（后台 SSE 持续写入，切回时能拿到最新内容）
-        const cachedMsgs = messagesCacheRef.current[activeConvId];
-        if (cachedMsgs) {
-          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-            m.id === aiMsg.id ? { ...m, raw_content: fullRawContent, content: fullRawContent } : m
-          );
-        }
-        // 仅当用户仍在当前会话时更新 UI
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setMessages(prev => prev.map(m =>
-          m.id === aiMsg.id ? { ...m, raw_content: fullRawContent, content: fullRawContent } : m
-        ));
-      },
-      onParsed(thoughtProcess, displayContent) {
-        const cachedMsgs = messagesCacheRef.current[activeConvId];
-        if (cachedMsgs) {
-          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-            m.id === aiMsg.id ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
-          );
-        }
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setMessages(prev => prev.map(m =>
-          m.id === aiMsg.id ? { ...m, thought_process: thoughtProcess, content: displayContent } : m
-        ));
-      },
-      onReasoning(token: string) {
-        currentReasoning += token;
-        // 构建实时 reasoningSegments：当前未闭合的 reasoning 段 + 已完成的 tool_call 段
-        const liveSegments = [...reasoningSegments, { type: 'reasoning', text: currentReasoning }];
-        const cachedMsgs = messagesCacheRef.current[activeConvId];
-        if (cachedMsgs) {
-          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-            m.id === aiMsg.id ? { ...m, thought_process: currentReasoning, reasoningSegments: liveSegments } : m
-          );
-        }
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setMessages(prev => prev.map(m =>
-          m.id === aiMsg.id ? { ...m, thought_process: currentReasoning, reasoningSegments: liveSegments } : m
-        ));
-      },
-      onDone(messageId, content, thoughtProcess, metrics, aborted) {
-
-        // 刷新剩余推理缓冲为最后一个 reasoning 段
-        if (currentReasoning) {
-          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
-        }
-        const finalSegments = [...reasoningSegments];
-
-        const finalizeMessage = (prev: Message[]) => prev.map(m =>
-          m.id === aiMsg.id
-            ? { ...m, id: messageId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false, reasoningSegments: finalSegments }
-            : m
-        );
-
-        const isCurrentConv = activeConvId === currentConversationIdRef.current;
-        if (isCurrentConv) {
-          setMessages(finalizeMessage);
-          setIsStreaming(false);
-          setStreamingConversationId(null);
-          setAbortController(null);
-          delete abortControllersRef.current[activeConvId];
-          delete messagesCacheRef.current[activeConvId];
-          // 不再调用 loadMessages：finalizeMessage 已包含正确的 reasoningSegments 交错顺序，
-          // loadMessages 会从 DB 加载扁平数据，丢失工具调用的位置信息。
-          // 用户切换会话时 loadMessages 仍会触发，保证数据一致性。
-          if (currentAssistantId) loadConversations(currentAssistantId);
-        } else {
-          // 用户已切走：更新缓存为完成态，不污染当前会话的全局状态
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) {
-            messagesCacheRef.current[activeConvId] = finalizeMessage(cached);
-          }
-        }
-      },
-      onToolCall(toolCallId, toolName, args) {
-        // 刷新当前推理缓冲为 reasoning 段，然后插入 tool_call 段
-        if (currentReasoning) {
-          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
-          currentReasoning = '';
-        }
-        const tcEntry = { toolCallId, toolName, args, status: 'running' as const };
-        reasoningSegments.push({ type: 'tool_call', toolCall: tcEntry });
-        // 同时维护旧 toolCalls 字段（向后兼容）
-        const updateTc = (prev: Message[]) => prev.map(m =>
-          m.id === aiMsg.id
-            ? { ...m, toolCalls: [...(m.toolCalls || []), tcEntry], reasoningSegments: [...reasoningSegments] }
-            : m
-        );
-        if (activeConvId === currentConversationIdRef.current) {
-          setMessages(updateTc);
-        } else {
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) messagesCacheRef.current[activeConvId] = updateTc(cached);
-        }
-      },
-      onToolResult(toolCallId, toolName, result) {
-        // 更新 reasoningSegments 中对应 tool_call 的状态
-        reasoningSegments = reasoningSegments.map(seg =>
-          seg.type === 'tool_call' && seg.toolCall.toolCallId === toolCallId
-            ? { ...seg, toolCall: { ...seg.toolCall, result, status: 'done' as const } }
-            : seg
-        );
-        // 清除同工具名下无结果的幽灵 running 条目（模型有时会发空参数的预调用）
-        reasoningSegments = reasoningSegments.filter(seg =>
-          !(seg.type === 'tool_call' && seg.toolCall.toolName === toolName && seg.toolCall.status === 'running' && !seg.toolCall.result)
-        );
-        const updateTr = (prev: Message[]) => prev.map(m =>
-          m.id === aiMsg.id
-            ? { ...m, toolCalls: (m.toolCalls || []).filter(tc =>
-                !(tc.toolName === toolName && tc.status === 'running' && !tc.result)
-              ).map(tc =>
-                tc.toolCallId === toolCallId ? { ...tc, result, status: 'done' as const } : tc
-              ), reasoningSegments: [...reasoningSegments] }
-            : m
-        );
-        if (activeConvId === currentConversationIdRef.current) {
-          setMessages(updateTr);
-        } else {
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) messagesCacheRef.current[activeConvId] = updateTr(cached);
-        }
-      },
-      onStepStart(step: number) {
-        // 多步工具执行：step 2+ 开始时刷新推理缓冲并清空前一步的草稿文本
-        if (currentReasoning) {
-          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
-          currentReasoning = '';
-        }
-        fullRawContent = '';
-        const updateStep = (prev: Message[]) => prev.map(m =>
-          m.id === aiMsg.id
-            ? { ...m, raw_content: '', content: '', thought_process: null }
-            : m
-        );
-        if (activeConvId === currentConversationIdRef.current) {
-          setMessages(updateStep);
-        } else {
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) messagesCacheRef.current[activeConvId] = updateStep(cached);
-        }
-      },
-      onError(error) {
-
-        const finalizeError = (prev: Message[]) => prev.map(m =>
-          m.id === aiMsg.id
-            ? { ...m, content: `错误: ${error}`, isStreaming: false }
-            : m
-        );
-
-        const isCurrentConv = activeConvId === currentConversationIdRef.current;
-        if (isCurrentConv) {
-          setMessages(finalizeError);
-          setIsStreaming(false);
-          setStreamingConversationId(null);
-          setAbortController(null);
-          delete abortControllersRef.current[activeConvId];
-          delete messagesCacheRef.current[activeConvId];
-        } else {
-          // 用户已切走：更新缓存为错误态，不污染当前会话的全局状态
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) {
-            messagesCacheRef.current[activeConvId] = finalizeError(cached);
-          }
-        }
-      },
     }, files, { webSearchEnabled: currentUIState.webSearchEnabled });
-    abortControllersRef.current[activeConvId] = controller;
+    abortControllersRef.current[activeConvRef.current] = controller;
     setAbortController(controller);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
 
@@ -623,166 +466,19 @@ export default function App() {
       }
     }
 
-    let fullRawContent = '';
-    let currentReasoning = '';
-    let reasoningSegments: any[] = [];
+    const state = { fullRawContent: '', currentReasoning: '', reasoningSegments: [] as any[] };
+    const activeConvRef = { current: activeConvId };
 
-    const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, {
-      onMeta(_convId) {
-      },
-      onToken(token) {
-        fullRawContent += token;
-        const cachedMsgs = messagesCacheRef.current[activeConvId];
-        if (cachedMsgs) {
-          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-            m.id === effectiveMessageId ? { ...m, raw_content: fullRawContent, content: fullRawContent, aborted: false } : m
-          );
-        }
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setMessages(prev => prev.map(m =>
-          m.id === effectiveMessageId ? { ...m, raw_content: fullRawContent, content: fullRawContent, aborted: false } : m
-        ));
-      },
-      onParsed(thoughtProcess, displayContent) {
-        const cachedMsgs = messagesCacheRef.current[activeConvId];
-        if (cachedMsgs) {
-          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-            m.id === effectiveMessageId ? { ...m, thought_process: thoughtProcess, content: displayContent, aborted: false } : m
-          );
-        }
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setMessages(prev => prev.map(m =>
-          m.id === effectiveMessageId ? { ...m, thought_process: thoughtProcess, content: displayContent, aborted: false } : m
-        ));
-      },
-      onReasoning(token) {
-        currentReasoning += token;
-        const liveSegments = [...reasoningSegments, { type: 'reasoning', text: currentReasoning }];
-        const cachedMsgs = messagesCacheRef.current[activeConvId];
-        if (cachedMsgs) {
-          messagesCacheRef.current[activeConvId] = cachedMsgs.map(m =>
-            m.id === effectiveMessageId ? { ...m, thought_process: currentReasoning, reasoningSegments: liveSegments } : m
-          );
-        }
-        if (activeConvId !== currentConversationIdRef.current) return;
-        setMessages(prev => prev.map(m =>
-          m.id === effectiveMessageId ? { ...m, thought_process: currentReasoning, reasoningSegments: liveSegments } : m
-        ));
-      },
-      onDone(newMsgId, content, thoughtProcess, metrics, aborted) {
+    const ctx = {
+      messagesCacheRef, currentConversationIdRef, abortControllersRef,
+      setMessages, setIsStreaming, setStreamingConversationId, setAbortController,
+    };
 
-        if (currentReasoning) {
-          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
-        }
-        const finalSegments = [...reasoningSegments];
+    const callbacks = createStreamCallbacks(effectiveMessageId, activeConvRef, state, ctx, {
+      onAfterDone: () => { if (currentAssistantId) loadConversations(currentAssistantId); },
+    });
 
-        const finalizeMessage = (prev: Message[]) => prev.map(m =>
-          m.id === effectiveMessageId
-            ? { ...m, id: newMsgId, content, thought_process: thoughtProcess, metrics: metrics || null, aborted: aborted || false, isStreaming: false, reasoningSegments: finalSegments }
-            : m
-        );
-
-        const isCurrentConv = activeConvId === currentConversationIdRef.current;
-        if (isCurrentConv) {
-          setMessages(finalizeMessage);
-          setIsStreaming(false);
-          setStreamingConversationId(null);
-          setAbortController(null);
-          delete abortControllersRef.current[activeConvId];
-          delete messagesCacheRef.current[activeConvId];
-          // 不再调用 loadMessages：finalizeMessage 已包含正确的 reasoningSegments 交错顺序，
-          // loadMessages 会从 DB 加载扁平数据，丢失工具调用的位置信息。
-          if (currentAssistantId) loadConversations(currentAssistantId);
-        } else {
-          // 用户已切走：更新缓存为完成态，不污染当前会话的全局状态
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) {
-            messagesCacheRef.current[activeConvId] = finalizeMessage(cached);
-          }
-        }
-      },
-      onToolCall(toolCallId, toolName, args) {
-        if (currentReasoning) {
-          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
-          currentReasoning = '';
-        }
-        const tcEntry = { toolCallId, toolName, args, status: 'running' as const };
-        reasoningSegments.push({ type: 'tool_call', toolCall: tcEntry });
-        const updateTc = (prev: Message[]) => prev.map(m =>
-          m.id === effectiveMessageId
-            ? { ...m, toolCalls: [...(m.toolCalls || []), tcEntry], reasoningSegments: [...reasoningSegments] }
-            : m
-        );
-        if (activeConvId === currentConversationIdRef.current) {
-          setMessages(updateTc);
-        } else {
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) messagesCacheRef.current[activeConvId] = updateTc(cached);
-        }
-      },
-      onToolResult(toolCallId, toolName, result) {
-        reasoningSegments = reasoningSegments.map(seg =>
-          seg.type === 'tool_call' && seg.toolCall.toolCallId === toolCallId
-            ? { ...seg, toolCall: { ...seg.toolCall, result, status: 'done' as const } }
-            : seg
-        );
-        const updateTr = (prev: Message[]) => prev.map(m =>
-          m.id === effectiveMessageId
-            ? { ...m, toolCalls: (m.toolCalls || []).map(tc =>
-                tc.toolCallId === toolCallId ? { ...tc, result, status: 'done' as const } : tc
-              ), reasoningSegments: [...reasoningSegments] }
-            : m
-        );
-        if (activeConvId === currentConversationIdRef.current) {
-          setMessages(updateTr);
-        } else {
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) messagesCacheRef.current[activeConvId] = updateTr(cached);
-        }
-      },
-      onStepStart(step: number) {
-        if (currentReasoning) {
-          reasoningSegments.push({ type: 'reasoning', text: currentReasoning });
-          currentReasoning = '';
-        }
-        fullRawContent = '';
-        const updateStep = (prev: Message[]) => prev.map(m =>
-          m.id === effectiveMessageId
-            ? { ...m, raw_content: '', content: '', thought_process: null }
-            : m
-        );
-        if (activeConvId === currentConversationIdRef.current) {
-          setMessages(updateStep);
-        } else {
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) messagesCacheRef.current[activeConvId] = updateStep(cached);
-        }
-      },
-      onError(error) {
-
-        const finalizeError = (prev: Message[]) => prev.map(m =>
-          m.id === effectiveMessageId
-            ? { ...m, content: `错误: ${error}`, isStreaming: false }
-            : m
-        );
-
-        const isCurrentConv = activeConvId === currentConversationIdRef.current;
-        if (isCurrentConv) {
-          setMessages(finalizeError);
-          setIsStreaming(false);
-          setStreamingConversationId(null);
-          setAbortController(null);
-          delete abortControllersRef.current[activeConvId];
-          delete messagesCacheRef.current[activeConvId];
-        } else {
-          // 用户已切走：更新缓存为错误态，不污染当前会话的全局状态
-          const cached = messagesCacheRef.current[activeConvId];
-          if (cached) {
-            messagesCacheRef.current[activeConvId] = finalizeError(cached);
-          }
-        }
-      },
-    }, { webSearchEnabled: currentUIState.webSearchEnabled });
+    const regenController = regenerateSSE(currentAssistantId, activeConvId, effectiveMessageId, thinkingMode, callbacks, { webSearchEnabled: currentUIState.webSearchEnabled });
     abortControllersRef.current[activeConvId] = regenController;
     setAbortController(regenController);
   }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages]);

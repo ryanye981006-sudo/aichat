@@ -2,7 +2,6 @@
    全局样式入口 — 汇聚所有样式文件
    ============================================================ */
 
-@import './tokens.css';
 @import './design-tokens.css';
 @import './tailwind.css';
 @import './animations.css';
@@ -34,14 +33,14 @@ body,
 body {
   display: flex;
   min-height: 100vh;
-  color: var(--color-text);
+  color: var(--fg);
   font-size: 14px;
   line-height: 1.6;
   overflow: hidden;
-  font-family: var(--font-family);
+  font-family: var(--font-body);
   text-rendering: optimizeLegibility;
   transition: background-color 0.3s linear;
-  background-color: var(--color-background);
+  background-color: var(--bg);
 
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -82,11 +81,11 @@ ul {
 
 ::-webkit-scrollbar-thumb {
   border-radius: var(--scrollbar-thumb-radius);
-  background: var(--color-scrollbar-thumb);
+  background: var(--scrollbar-thumb);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-scrollbar-thumb-hover);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* ===== 文本截断工具类 ===== */
@@ -103,9 +102,9 @@ ul {
 
 /* ===== emoji-picker-element 自定义样式 ===== */
 emoji-picker {
-  --background: var(--color-background) !important;
+  --background: var(--bg) !important;
   --border-radius: 12px !important;
-  --font-family: var(--font-family) !important;
+  --font-family: var(--font-body) !important;
   --emoji-size: 20px !important;
   --num-columns: 8 !important;
 }
@@ -132,7 +131,7 @@ emoji-picker.dark {
 
 /* ===== 图标颜色统一 ===== */
 .lucide:not(.lucide-custom) {
-  color: var(--color-icon);
+  color: var(--icon);
 }
 
 /* ===== Range Slider 滑动条样式 ===== */
@@ -141,7 +140,7 @@ input[type='range'] {
   appearance: none;
   height: 6px;
   border-radius: 3px;
-  background: var(--color-border);
+  background: var(--border);
   outline: none;
   cursor: pointer;
 }
@@ -152,7 +151,7 @@ input[type='range']::-webkit-slider-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--accent);
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   transition: transform 0.15s ease;
@@ -166,7 +165,7 @@ input[type='range']::-moz-range-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: var(--color-primary);
+  background: var(--accent);
   cursor: pointer;
   border: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
@@ -175,5 +174,5 @@ input[type='range']::-moz-range-thumb {
 input[type='range']::-moz-range-track {
   height: 6px;
   border-radius: 3px;
-  background: var(--color-border);
+  background: var(--border);
 }

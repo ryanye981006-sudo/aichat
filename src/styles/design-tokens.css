@@ -29,6 +29,21 @@
   --warn:          #c9a43b;
   --danger:        #d4606a;
 
+  /* 图标颜色 */
+  --icon:          rgba(230, 235, 247, 0.6);
+
+  /* 代码块 */
+  --code-bg:             #3d546e;
+  --code-inline-bg:      #3d546e;
+  --code-inline-fg:      #fab387;
+
+  /* 滚动条 */
+  --scrollbar-thumb:       rgba(230, 235, 247, 0.15);
+  --scrollbar-thumb-hover: rgba(230, 235, 247, 0.25);
+  --scrollbar-width:       6px;
+  --scrollbar-height:      6px;
+  --scrollbar-thumb-radius: 10px;
+
   /* ===== 字体系统 ===== */
   --font-display:
     -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', system-ui, sans-serif;
@@ -107,6 +122,12 @@
   --success:       #5aae7e;
   --warn:          #d4b44b;
   --danger:        #e4707a;
+  --icon:          rgba(76, 92, 134, 0.6);
+  --code-bg:             #ccdaf0;
+  --code-inline-bg:      rgba(76, 92, 134, 0.08);
+  --code-inline-fg:      #c0392b;
+  --scrollbar-thumb:       rgba(76, 92, 134, 0.15);
+  --scrollbar-thumb-hover: rgba(76, 92, 134, 0.25);
 }
 
 /* ===== 设置页通用样式 ===== */

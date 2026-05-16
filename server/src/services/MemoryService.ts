@@ -10,6 +10,27 @@ import { v4 as uuidv4 } from 'uuid';
 import type { FactExtraction } from '../types/index.js';
 
 export class MemoryService {
+  // 嵌入向量缓存：避免每次查询重复 JSON.parse（key: memoryId, value: Float32Array）
+  private embeddingCache = new Map<string, Float32Array>();
+
+  private parseEmbedding(id: string, embeddingStr: string | null): Float32Array {
+    const cached = this.embeddingCache.get(id);
+    if (cached) return cached;
+    try {
+      const arr = JSON.parse(embeddingStr || '[]') as number[];
+      const f32 = new Float32Array(arr);
+      this.embeddingCache.set(id, f32);
+      return f32;
+    } catch {
+      return new Float32Array(0);
+    }
+  }
+
+  private invalidateCache(_id?: string) {
+    if (_id) this.embeddingCache.delete(_id);
+    else this.embeddingCache.clear();
+  }
+
   // 从对话中提取记忆事实
   async extractFacts(messages: { role: string; content: string }[]): Promise<FactExtraction[]> {
     const db = getDb();
@@ -143,7 +164,7 @@ export class MemoryService {
 
       const results = memories
         .map(m => {
-          const emb = JSON.parse(m.embedding || '[]');
+          const emb = this.parseEmbedding(m.id, m.embedding);
           const score = emb.length > 0 ? cosineSimilarity(embedding, emb) : 0;
           return { id: m.id, content: m.content, score };
         })
@@ -188,7 +209,7 @@ export class MemoryService {
 
     for (const m of allMemories) {
       try {
-        const emb = JSON.parse(m.embedding || '[]');
+        const emb = this.parseEmbedding(m.id, m.embedding);
         if (emb.length > 0 && cosineSimilarity(embedding, emb) >= config.memorySimilarityThreshold) {
           await this.createSourceLink(m.id, chunkId);
           return m.id;
@@ -213,6 +234,7 @@ export class MemoryService {
         source_conversation_id, access_count, valid_from)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
     `).run(id, content, hash, JSON.stringify(embedding), topic, importance, metadata, sourceConversationId || null);
+    this.invalidateCache();
 
     db.prepare(
       "INSERT INTO memory_history (memory_id, action, new_value) VALUES (?, 'ADD', ?)"
@@ -349,11 +371,11 @@ export class MemoryService {
     try {
       const { embedding } = await embeddingService.embed(content);
       const embArray = allMemories.filter(m => {
-        try { return JSON.parse(m.embedding || '[]').length > 0; } catch { return false; }
+        try { return this.parseEmbedding(m.id, m.embedding).length > 0; } catch { return false; }
       });
 
       for (const m of embArray) {
-        const sim = cosineSimilarity(embedding, JSON.parse(m.embedding));
+        const sim = cosineSimilarity(embedding, this.parseEmbedding(m.id, m.embedding));
         if (sim >= config.memorySimilarityThreshold) return m.id;
       }
 

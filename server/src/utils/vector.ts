@@ -1,5 +1,5 @@
-// 余弦相似度计算
-export function cosineSimilarity(a: number[], b: number[]): number {
+// 余弦相似度计算（支持 Float32Array 避免 alloc 开销）
+export function cosineSimilarity(a: number[] | Float32Array, b: number[] | Float32Array): number {
   if (a.length !== b.length) return 0;
   let dot = 0, normA = 0, normB = 0;
   for (let i = 0; i < a.length; i++) {

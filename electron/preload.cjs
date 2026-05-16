@@ -1,8 +1,11 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // ---- 现有通道 ----
+  // ---- 窗口控制 ----
   isElectron: true,
+  minimizeWindow: () => ipcRenderer.send('window-minimize'),
+  maximizeWindow: () => ipcRenderer.send('window-maximize'),
+  closeWindow: () => ipcRenderer.send('window-close'),
   toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
   onFullscreenChange: (callback) => {
     ipcRenderer.on('fullscreen-changed', (_event, isFullscreen) => callback(isFullscreen));

@@ -13,6 +13,16 @@ export default defineConfig(({ mode }) => {
       },
     },
     base: mode === 'production' ? './' : '/',
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            antd: ['antd'],
+            markdown: ['react-markdown', 'remark-gfm'],
+          },
+        },
+      },
+    },
     server: {
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {

@@ -31,8 +31,8 @@
   100% { background-position: -200% 0; }
 }
 .animation-shimmer {
-  --color-shimmer-mid: var(--color-text-1);
-  --color-shimmer-end: color-mix(in srgb, var(--color-text-1) 25%, transparent);
+  --color-shimmer-mid: var(--fg);
+  --color-shimmer-end: color-mix(in srgb, var(--fg) 25%, transparent);
   background: linear-gradient(to left, var(--color-shimmer-end), var(--color-shimmer-mid), var(--color-shimmer-end));
   background-size: 200% 100%;
   background-clip: text;
@@ -56,8 +56,8 @@
 /* 定位高亮动画 */
 @keyframes animation-locate-highlight {
   0% { background-color: transparent; }
-  10% { background-color: var(--color-primary-mute); }
-  70% { background-color: var(--color-primary-mute); }
+  10% { background-color: var(--accent-dim); }
+  70% { background-color: var(--accent-dim); }
   100% { background-color: transparent; }
 }
 .animation-locate-highlight {

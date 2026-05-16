@@ -14,3 +14,4 @@ server/src/eval/
 release/
 server-dist/
 electron/bin/
+release-*/

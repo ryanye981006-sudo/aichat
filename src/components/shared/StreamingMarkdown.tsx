@@ -34,14 +34,14 @@ export default function StreamingMarkdown({ content, isStreaming, className }: S
         }
         .prose code {
           font-family: var(--font-mono);
-          background: var(--color-inline-code-background);
-          color: var(--color-inline-code-text);
+          background: var(--code-inline-bg);
+          color: var(--code-inline-fg);
           padding: 0.15rem 0.4rem;
           border-radius: 4px;
           font-size: 0.875em;
         }
         .prose pre {
-          background: var(--color-code-background);
+          background: var(--code-bg);
           padding: 1rem;
           border-radius: 8px;
           overflow-x: auto;
