@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import AssistantModal from './components/AssistantModal';
+import AssistantSelectModal from './components/AssistantSelectModal';
+import ModelSelectModal from './components/shared/ModelSelectModal';
 import SettingsArea from './components/SettingsArea';
 import WindowFrame from './components/WindowFrame';
 import type { Assistant, Provider, Model, Conversation, Message, ConversationUIState } from './types';
@@ -33,6 +35,8 @@ export default function App() {
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
+  const [showAssistantSelectModal, setShowAssistantSelectModal] = useState(false);
+  const [showModelSelect, setShowModelSelect] = useState(false);
 
   // 消息按会话维度缓存：流式生成中切出再切回时保留流式状态
   const messagesCacheRef = useRef<Record<string, Message[]>>({});
@@ -44,6 +48,11 @@ export default function App() {
 
   // 当前助手
   const currentAssistant = assistants.find(a => a.id === currentAssistantId) || null;
+
+  // 当前助手的历史对话（按更新时间降序）
+  const currentAssistantConversations = conversations
+    .filter(c => c.assistant_id === currentAssistantId)
+    .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
 
   // 当前会话 UI 状态（深度思考模式 + 联网搜索开关）
   const currentUIState: ConversationUIState = currentConversationId
@@ -236,6 +245,20 @@ export default function App() {
         setMessages([]);
         setConversations([]);
       }
+    } catch (e) { console.error(e); }
+  };
+
+  // ===== 模型切换（Header 面包屑点击 → ModelSelectModal） =====
+  const handleSwitchModel = () => {
+    if (!currentAssistant) return;
+    setShowModelSelect(true);
+  };
+
+  const handleModelSelect = async (providerId: string, modelId: string) => {
+    if (!currentAssistantId) return;
+    try {
+      const updated = await assistantsApi.update(currentAssistantId, { provider_id: providerId, model_id: modelId });
+      setAssistants(prev => prev.map(a => a.id === updated.id ? updated : a));
     } catch (e) { console.error(e); }
   };
 
@@ -518,21 +541,16 @@ export default function App() {
       isWindowed={isWindowedPreview}
       onToggleWindowed={() => setIsWindowedPreview(!isWindowedPreview)}
     >
-      <div className="flex flex-col h-full" style={{ backgroundColor: 'var(--bg)' }}>
+      <div className="flex flex-col h-full flex-1" style={{ backgroundColor: 'var(--bg)', minWidth: 0 }}>
         <div className="flex flex-1 overflow-hidden" style={{ minWidth: 0 }}>
           <Sidebar
-            assistants={assistants}
-            conversations={conversations}
-            currentAssistantId={currentAssistantId}
+            conversations={currentAssistantConversations}
             currentConversationId={currentConversationId}
-            onSelectAssistant={handleSelectAssistant}
             onSelectConversation={handleSelectConversation}
-            onCreateAssistant={handleCreateAssistant}
             onCreateConversation={handleCreateConversation}
-            onEditAssistant={handleEditAssistant}
-            onRemoveAssistant={handleRemoveAssistant}
             onRemoveConversation={handleRemoveConversation}
             onOpenSettings={() => setShowSettings(true)}
+            onSwitchAssistant={() => setShowAssistantSelectModal(true)}
           />
           <ChatArea
             assistant={currentAssistant}
@@ -541,6 +559,7 @@ export default function App() {
             isStreaming={isStreaming}
             onStopGeneration={handleStopGeneration}
             onEditAssistant={handleEditAssistant}
+            onSwitchModel={handleSwitchModel}
             onThinkingModeChange={handleThinkingModeChange}
             onRegenerate={handleRegenerate}
             providers={providers}
@@ -577,6 +596,24 @@ export default function App() {
           providers={providers}
           models={models}
           onDelete={handleRemoveAssistant}
+        />
+
+        <AssistantSelectModal
+          isOpen={showAssistantSelectModal}
+          onClose={() => setShowAssistantSelectModal(false)}
+          assistants={assistants}
+          currentAssistantId={currentAssistantId}
+          onSelectAssistant={handleSelectAssistant}
+          onCreateAssistant={handleCreateAssistant}
+        />
+
+        <ModelSelectModal
+          isOpen={showModelSelect}
+          onClose={() => setShowModelSelect(false)}
+          onSelect={handleModelSelect}
+          providers={providers.filter(p => p.enabled)}
+          models={models}
+          currentModelId={currentAssistant?.model_id || ''}
         />
       </div>
     </WindowFrame>

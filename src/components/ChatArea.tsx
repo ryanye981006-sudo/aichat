@@ -3,7 +3,7 @@ import type { Assistant, Message, Provider, Model, FileAttachment } from '../typ
 import { cn } from '../lib/utils';
 import { isReasoningModel } from '../lib/reasoning';
 import { getFileCategory, checkFileAllowed, getSupportedExts } from '../lib/modelCapabilities';
-import { Send, Paperclip, Copy, RefreshCw, Check, Square, AlertTriangle, X } from 'lucide-react';
+import { Send, Paperclip, Copy, RefreshCw, Check, Square, AlertTriangle, X, ChevronDown } from 'lucide-react';
 import { Tooltip, message as antMessage } from 'antd';
 import StreamingMarkdown from './shared/StreamingMarkdown';
 import ThinkBlock from './shared/ThinkBlock';
@@ -16,6 +16,7 @@ interface ChatAreaProps {
   onSendMessage: (content: string, thinkingMode: string, files?: FileAttachment[]) => void;
   isStreaming: boolean;
   onEditAssistant: (assistant: Assistant) => void;
+  onSwitchModel?: () => void;
   onThinkingModeChange?: (mode: string) => void;
   providers: Provider[];
   models: Model[];
@@ -93,7 +94,7 @@ function extractSearchUrls(tc: any): Set<string> {
 }
 
 export default function ChatArea({
-  assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onThinkingModeChange,
+  assistant, messages, onSendMessage, isStreaming, onStopGeneration, onEditAssistant, onSwitchModel, onThinkingModeChange,
   providers, models, onRegenerate,
   conversationId, conversationPrivacyMode, onTogglePrivacyMode,
   deepThinkingMode = true, onDeepThinkingChange,
@@ -249,21 +250,24 @@ export default function ChatArea({
     <div className="flex-1 flex flex-col h-full relative" style={{
       background: 'linear-gradient(180deg, var(--chat-bg) 0%, #f0f3fa 100%)',
     }}>
-      {/* ===== Header ===== */}
+      {/* ===== Header（面包屑风格） ===== */}
       <div
-        className="h-14 flex items-center px-5 shrink-0 border-b gap-3"
+        className="h-14 flex items-center px-5 shrink-0 border-b gap-1.5"
         style={{ borderColor: 'var(--border)' }}
       >
+        {/* 助手名称 — 面包屑 */}
         <button
           onClick={() => onEditAssistant(assistant)}
-          className="flex items-center gap-3 px-1 py-1 rounded-lg transition-colors hover:opacity-80"
+          className="flex items-center gap-1.5 pl-1 pr-1.5 py-1 -ml-1 rounded-md transition-colors select-none"
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+          }}
+          title="点击编辑助手"
         >
-          <div
-            className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
-            style={{ backgroundColor: 'var(--accent-dim)' }}
-          >
-            <span style={{ fontSize: 15 }}>{assistant.emoji || '🤖'}</span>
-          </div>
+          <span style={{ fontSize: 15, lineHeight: 1 }}>{assistant.emoji || '🤖'}</span>
           <span
             className="font-semibold text-sm"
             style={{ color: 'var(--fg)', fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
@@ -271,16 +275,34 @@ export default function ChatArea({
             {assistant.name}
           </span>
         </button>
-        <span
-          className="text-[11px] font-medium px-2.5 py-0.5 rounded-full"
-          style={{
-            backgroundColor: 'var(--hover-bg)',
-            color: 'var(--muted)',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          {model?.display_name || model?.name || '未选择模型'}
+
+        {/* 斜杠分隔符 */}
+        <span className="text-sm select-none" style={{ color: 'var(--muted-soft)', opacity: 0.35 }}>
+          /
         </span>
+
+        {/* 模型名称 — 面包屑 + 下拉箭头 */}
+        <button
+          onClick={() => onSwitchModel?.()}
+          className="flex items-center gap-1 pl-1.5 pr-1 py-1 -ml-0.5 rounded-md transition-colors select-none"
+          onMouseEnter={e => {
+            (e.currentTarget as HTMLElement).style.backgroundColor = 'var(--hover-bg)';
+          }}
+          onMouseLeave={e => {
+            (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent';
+          }}
+          title="点击切换模型"
+        >
+          <span style={{ fontSize: 13, lineHeight: 1 }}>✨</span>
+          <span
+            className="text-sm font-medium"
+            style={{ color: 'var(--muted)', fontFamily: 'var(--font-body)' }}
+          >
+            {model?.display_name || model?.name || '未选择模型'}
+          </span>
+          <ChevronDown className="w-3 h-3" style={{ color: 'var(--muted-soft)' }} />
+        </button>
+
         <div className="flex-1" />
 
         {/* 隐私胶囊 */}
