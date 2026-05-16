@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { getDb } from '../db/connection.js';
 import { webSearchService } from '../services/WebSearchService.js';
+import { IqsSearchProvider } from '../services/webSearch/IqsSearchProvider.js';
 import { config } from '../config.js';
 
 const router = Router();
@@ -36,6 +37,22 @@ router.put('/iqs-key', (req, res) => {
   webSearchService.initFromConfig(apiKey);
 
   res.json({ success: true, configured: !!apiKey });
+});
+
+// 测试 IQS Key 连通性
+router.post('/iqs-key/test', async (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey) {
+    return res.status(400).json({ error: 'apiKey 不能为空' });
+  }
+  try {
+    const provider = new IqsSearchProvider(apiKey, config.iqsBaseUrl);
+    const startTime = Date.now();
+    await provider.search({ query: 'test', maxResults: 1 });
+    res.json({ success: true, time: Date.now() - startTime });
+  } catch (e) {
+    res.json({ success: false, time: 0, error: (e as Error).message });
+  }
 });
 
 export default router;

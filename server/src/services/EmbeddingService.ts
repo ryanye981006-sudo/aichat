@@ -1,5 +1,6 @@
 // 统一嵌入服务：调用 OpenAI 兼容的 /v1/embeddings API
 // 支持嵌入缓存、指数退避重试、批量嵌入
+// 配置优先级：user_profile 工具设置覆盖 > memory_settings 全局配置
 import { getDb } from '../db/connection.js';
 import { config } from '../config.js';
 import { embeddingCache } from './EmbeddingCache.js';
@@ -22,16 +23,56 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// 从 user_profile 读取工具设置页的嵌入模型覆盖配置
+function getToolEmbeddingOverride(): { apiKey?: string; apiUrl?: string; modelName?: string } | null {
+  const db = getDb();
+  const modelName = db.prepare("SELECT value FROM user_profile WHERE key = 'embedding_model_name'").get() as any;
+  if (!modelName?.value) return null;
+  const apiKey = db.prepare("SELECT value FROM user_profile WHERE key = 'embedding_api_key'").get() as any;
+  const apiUrl = db.prepare("SELECT value FROM user_profile WHERE key = 'embedding_api_url'").get() as any;
+  return {
+    modelName: modelName.value,
+    apiKey: apiKey?.value || undefined,
+    apiUrl: apiUrl?.value || undefined,
+  };
+}
+
 export class EmbeddingService {
   private maxRetries = 3;
   private retryBaseMs = 1000;
 
+  // 解析嵌入配置：工具设置覆盖优先，否则使用 memory_settings 全局配置
+  private resolveEmbeddingConfig(db: any): { provider: any; modelName: string } | null {
+    const override = getToolEmbeddingOverride();
+    if (override?.modelName) {
+      // 工具设置中有嵌入模型配置，按模型名查找对应 provider
+      const model = db.prepare("SELECT * FROM models WHERE name = ?").get(override.modelName) as any;
+      if (model) {
+        const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(model.provider_id) as any;
+        if (provider?.enabled) {
+          // 工具设置中有独立 API Key/URL 则覆盖 provider 配置
+          const effectiveProvider = { ...provider };
+          if (override.apiKey) effectiveProvider.api_key = override.apiKey;
+          if (override.apiUrl) effectiveProvider.base_url = override.apiUrl;
+          return { provider: effectiveProvider, modelName: model.name };
+        }
+      }
+    }
+    // 回退到 memory_settings 全局配置
+    const settings = db.prepare('SELECT * FROM memory_settings WHERE id = 1').get() as any;
+    if (!settings?.embedding_provider_id || !settings?.embedding_model_id) return null;
+    const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(settings.embedding_provider_id) as any;
+    if (!provider?.enabled) return null;
+    const memModel = db.prepare('SELECT * FROM models WHERE id = ?').get(settings.embedding_model_id) as any;
+    if (!memModel) return null;
+    return { provider, modelName: memModel.name };
+  }
+
   // 使用默认全局配置嵌入（记忆模块用）
   async embed(text: string): Promise<EmbeddingResult> {
     const db = getDb();
-    const settings = db.prepare('SELECT * FROM memory_settings WHERE id = 1').get() as any;
-
-    if (!settings?.embedding_provider_id || !settings?.embedding_model_id) {
+    const resolved = this.resolveEmbeddingConfig(db);
+    if (!resolved) {
       console.warn('[EmbeddingService] 未配置嵌入模型，使用零向量占位');
       return {
         embedding: new Array(config.defaultEmbeddingDim).fill(0),
@@ -39,24 +80,16 @@ export class EmbeddingService {
       };
     }
 
-    const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(settings.embedding_provider_id) as any;
-    if (!provider || !provider.enabled) {
-      throw new Error('嵌入提供商未启用或不存在');
-    }
-
-    const model = db.prepare('SELECT * FROM models WHERE id = ?').get(settings.embedding_model_id) as any;
-    if (!model) {
-      throw new Error('嵌入模型不存在');
-    }
+    const { provider, modelName } = resolved;
 
     // 检查缓存
-    const cacheKey = embeddingCache.generateKey(text, provider.id, model.name);
+    const cacheKey = embeddingCache.generateKey(text, provider.id, modelName);
     const cached = embeddingCache.get(cacheKey);
     if (cached) return cached;
 
     // 调用 API 并写入缓存
-    const result = await this.callEmbeddingAPI(provider, model.name, text);
-    embeddingCache.set(cacheKey, result, provider.id, model.name);
+    const result = await this.callEmbeddingAPI(provider, modelName, text);
+    embeddingCache.set(cacheKey, result, provider.id, modelName);
     return result;
   }
 
@@ -79,26 +112,17 @@ export class EmbeddingService {
     return result;
   }
 
-  // 批量嵌入（使用全局配置），含缓存
+  // 批量嵌入（使用统一配置解析），含缓存
   async embedBatch(texts: string[]): Promise<EmbeddingResult[]> {
     const db = getDb();
-    const settings = db.prepare('SELECT * FROM memory_settings WHERE id = 1').get() as any;
-
-    if (!settings?.embedding_provider_id || !settings?.embedding_model_id) {
+    const resolved = this.resolveEmbeddingConfig(db);
+    if (!resolved) {
       return texts.map(() => ({
         embedding: new Array(config.defaultEmbeddingDim).fill(0),
         dimension: config.defaultEmbeddingDim
       }));
     }
-
-    const provider = db.prepare('SELECT * FROM providers WHERE id = ?').get(settings.embedding_provider_id) as any;
-    const model = db.prepare('SELECT * FROM models WHERE id = ?').get(settings.embedding_model_id) as any;
-
-    if (!provider?.enabled || !model) {
-      throw new Error('嵌入模型配置无效');
-    }
-
-    return this.embedBatchWithCache(texts, provider, model.name);
+    return this.embedBatchWithCache(texts, resolved.provider, resolved.modelName);
   }
 
   // 批量嵌入（指定配置），含缓存

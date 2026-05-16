@@ -30,8 +30,10 @@ getDb();
 // 启动空闲会话检测器（触发 B：会话空闲超时→强制提取记忆）
 conversationIdleDetector.start();
 
-// 初始化搜索引擎
-webSearchService.initFromConfig();
+// 初始化搜索引擎：优先从数据库加载用户通过 UI 保存的 IQS Key，否则回退到 .env
+const dbIqsRow = getDb().prepare("SELECT value FROM user_profile WHERE key = 'iqs_api_key'").get() as any;
+const iqsKey = dbIqsRow?.value || config.iqsApiKey;
+webSearchService.initFromConfig(iqsKey);
 
 // API 路由
 app.use('/api/assistants', assistantsRouter);
