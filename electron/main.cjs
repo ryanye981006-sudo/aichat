@@ -183,7 +183,7 @@ app.whenReady().then(() => {
         console.log('[Pet] 发现宠物:', entry.name, manifest.displayName);
         pets.push({
           id: entry.name,
-          name: manifest.displayName || manifest.name,
+          name: manifest.displayName || manifest.id || manifest.name,
           description: manifest.description || '',
           version: manifest.version || '1.0.0',
           installedAt: fs.statSync(manifestPath).mtime.toISOString(),
@@ -207,7 +207,7 @@ app.whenReady().then(() => {
       return { success: false, error: '未找到 pet.json' };
     }
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    const petName = manifest.name || path.basename(sourceDir);
+    const petName = manifest.id || manifest.name || path.basename(sourceDir);
     const destDir = path.join(petsDir, petName);
     fs.cpSync(sourceDir, destDir, { recursive: true });
     return {

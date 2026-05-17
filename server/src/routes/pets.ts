@@ -27,7 +27,7 @@ router.get('/', (_req, res) => {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
         pets.push({
           id: entry.name,
-          name: manifest.displayName || manifest.name,
+          name: manifest.displayName || manifest.id || manifest.name,
           description: manifest.description || '',
           version: manifest.version || '1.0.0',
           installedAt: fs.statSync(manifestPath).mtime.toISOString(),

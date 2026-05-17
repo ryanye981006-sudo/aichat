@@ -1,5 +1,6 @@
 // Canvas 2D 精灵图渲染引擎 — 逐帧播放 spritesheet 动画
-import type { PetManifest, PetAnimation } from './types';
+import type { PetManifest, PetAnimation, PetSprite } from './types';
+import { DEFAULT_SPRITE, DEFAULT_ANIMATIONS } from './types';
 
 export interface PlayOptions {
   loop?: boolean;       // 是否循环播放，默认 true
@@ -41,19 +42,30 @@ export class SpriteRenderer {
     this.resizeCanvas();
   }
 
+  // 获取 sprite 配置（缺失时回退到 Codex 社区默认值）
+  private getSprite(): PetSprite {
+    return this.manifest.sprite || DEFAULT_SPRITE;
+  }
+
+  // 获取 animations 配置（缺失时回退到 Codex 社区默认值）
+  private getAnimations(): Record<string, PetAnimation> {
+    return this.manifest.animations || DEFAULT_ANIMATIONS;
+  }
+
   // 缩放窗口尺寸
   private resizeCanvas(): void {
-    const { width, height } = this.manifest.sprite;
+    const { width, height } = this.getSprite();
     this.canvas.width = Math.round(width * this.scale);
     this.canvas.height = Math.round(height * this.scale);
   }
 
   // 播放指定状态的动画
   play(state: string, options: PlayOptions = {}): void {
-    const anim = this.manifest.animations[state];
+    const anims = this.getAnimations();
+    const anim = anims[state];
     if (!anim) {
       // 未知状态回退到 idle
-      const idleAnim = this.manifest.animations['idle'];
+      const idleAnim = anims['idle'];
       if (idleAnim) {
         return this.play('idle', options);
       }
@@ -141,7 +153,7 @@ export class SpriteRenderer {
   private drawFrame(): void {
     if (!this.currentAnim) return;
 
-    const { width, height, columns } = this.manifest.sprite;
+    const { width, height, columns } = this.getSprite();
     const col = this.currentFrame % columns;
     const row = this.currentRow;
 
@@ -162,8 +174,9 @@ export class SpriteRenderer {
   isOpaquePixel(canvasX: number, canvasY: number): boolean {
     const x = Math.floor(canvasX / this.scale);
     const y = Math.floor(canvasY / this.scale);
+    const sprite = this.getSprite();
 
-    if (x < 0 || y < 0 || x >= this.manifest.sprite.width || y >= this.manifest.sprite.height) {
+    if (x < 0 || y < 0 || x >= sprite.width || y >= sprite.height) {
       return false;
     }
 
@@ -173,7 +186,7 @@ export class SpriteRenderer {
     }
 
     if (this.alphaMap) {
-      const idx = y * this.manifest.sprite.width + x;
+      const idx = y * sprite.width + x;
       return idx < this.alphaMap.length && this.alphaMap[idx] > 30;
     }
 
@@ -183,10 +196,11 @@ export class SpriteRenderer {
   }
 
   private buildAlphaMap(): void {
+    const sprite = this.getSprite();
     // 在离屏 canvas 上绘制第一帧以提取 alpha
     const offscreen = document.createElement('canvas');
-    offscreen.width = this.manifest.sprite.width;
-    offscreen.height = this.manifest.sprite.height;
+    offscreen.width = sprite.width;
+    offscreen.height = sprite.height;
     const offCtx = offscreen.getContext('2d');
     if (!offCtx) return;
 

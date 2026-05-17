@@ -7,6 +7,39 @@
   const api = window.electronAPI;
   if (!api) { console.error('[Pet] electronAPI 不可用'); return; }
 
+  // Codex 社区标准默认精灵配置（1536×1872 spritesheet, 8×9 grid, 192×208 帧）
+  const DEFAULT_SPRITE = {
+    url: 'spritesheet.webp',
+    width: 192,
+    height: 208,
+    columns: 8,
+    rows: 9
+  };
+
+  // Codex 社区标准默认动画行映射
+  const DEFAULT_ANIMATIONS = {
+    idle:         { row: 0, frames: 8, fps: 4 },
+    waving:       { row: 1, frames: 8, fps: 6 },
+    review:       { row: 2, frames: 8, fps: 6 },
+    runningRight: { row: 3, frames: 8, fps: 8 },
+    jumping:      { row: 4, frames: 8, fps: 8 },
+    grab:         { row: 5, frames: 8, fps: 6 },
+    failed:       { row: 6, frames: 8, fps: 6 },
+    grabbing:     { row: 7, frames: 8, fps: 6 },
+    runningLeft:  { row: 8, frames: 8, fps: 8 }
+  };
+
+  // 获取 sprite 配置（缺失时回退到默认值）
+  function getSprite() {
+    return (petManifest && petManifest.sprite) ? petManifest.sprite : DEFAULT_SPRITE;
+  }
+
+  // 获取 animations 配置（缺失时回退到默认值）
+  function getAnimations() {
+    return (petManifest && petManifest.animations && Object.keys(petManifest.animations).length > 0)
+      ? petManifest.animations : DEFAULT_ANIMATIONS;
+  }
+
   // ============ DOM 引用 ============
   const canvas = document.getElementById('pet-canvas');
   const ctx = canvas.getContext('2d', { alpha: true });
@@ -36,16 +69,16 @@
   // ============ 精灵图渲染 ============
   function resizeCanvas() {
     if (!petManifest) return;
-    const { width, height } = petManifest.sprite;
-    canvas.width = Math.round(width * scale);
-    canvas.height = Math.round(height * scale);
+    const sprite = getSprite();
+    canvas.width = Math.round(sprite.width * scale);
+    canvas.height = Math.round(sprite.height * scale);
   }
 
   function drawFrame() {
     if (!petManifest || !spritesheet || !currentAnimation) return;
 
-    const { width, height, columns } = petManifest.sprite;
-    const col = currentFrame % columns;
+    const sprite = getSprite();
+    const col = currentFrame % sprite.columns;
     const row = currentAnimation.row;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -57,8 +90,8 @@
 
     ctx.drawImage(
       spritesheet,
-      col * width, row * height, width, height,
-      0, 0, Math.round(width * scale), Math.round(height * scale)
+      col * sprite.width, row * sprite.height, sprite.width, sprite.height,
+      0, 0, Math.round(sprite.width * scale), Math.round(sprite.height * scale)
     );
 
     ctx.globalAlpha = 1.0;
@@ -110,9 +143,10 @@
   // 播放指定状态动画
   function playAnimation(state, opts) {
     opts = opts || {};
-    if (!petManifest || !petManifest.animations) return;
+    if (!petManifest) return;
 
-    const anim = petManifest.animations[state];
+    const anims = getAnimations();
+    const anim = anims[state];
     if (!anim) {
       // 回退到 idle
       if (state !== 'idle') {
@@ -208,6 +242,18 @@
     petManifest = petData.manifest;
     scale = petData.zoom || 1.0;
 
+    // 填充社区格式缺失的默认值
+    if (!petManifest.sprite) {
+      petManifest.sprite = { ...DEFAULT_SPRITE };
+    }
+    // 社区格式用 spritesheetPath 字段指定文件名
+    if (petManifest.spritesheetPath && !petManifest.sprite.url) {
+      petManifest.sprite.url = petManifest.spritesheetPath;
+    }
+    if (!petManifest.animations || Object.keys(petManifest.animations).length === 0) {
+      petManifest.animations = { ...DEFAULT_ANIMATIONS };
+    }
+
     resizeCanvas();
 
     // 加载 spritesheet
@@ -222,7 +268,7 @@
     };
 
     // spritesheet 路径（通过 file:// 协议加载）
-    const ssPath = petPath + '/' + (petManifest.sprite.url || 'spritesheet.webp');
+    const ssPath = petPath + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp');
     // Windows 路径转换
     img.src = 'file:///' + ssPath.replace(/\\/g, '/').replace(/^\//, '');
   }
@@ -237,9 +283,10 @@
   // 像素碰撞检测：检测鼠标位置是否为非透明像素
   function isOpaquePixel(x, y) {
     if (!spritesheet || !petManifest) return true;
+    const sprite = getSprite();
     const sx = Math.floor(x / scale);
     const sy = Math.floor(y / scale);
-    if (sx < 0 || sy < 0 || sx >= petManifest.sprite.width || sy >= petManifest.sprite.height) return false;
+    if (sx < 0 || sy < 0 || sx >= sprite.width || sy >= sprite.height) return false;
 
     // 从 Canvas 读取当前帧的 alpha 值
     const pixel = ctx.getImageData(x, y, 1, 1);

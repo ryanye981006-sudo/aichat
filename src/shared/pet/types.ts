@@ -16,14 +16,42 @@ export interface PetSprite {
   rows: number;      // 行数（通常为 9）
 }
 
-// pet.json 完整结构（Codex Pet 格式）
+// Codex 社区标准默认精灵配置（1536×1872 spritesheet, 8×9 grid）
+export const DEFAULT_SPRITE: PetSprite = {
+  url: 'spritesheet.webp',
+  width: 192,
+  height: 208,
+  columns: 8,
+  rows: 9,
+};
+
+// Codex 社区标准默认动画行映射
+export const DEFAULT_ANIMATIONS: Record<string, PetAnimation> = {
+  idle:         { row: 0, frames: 8, fps: 4 },
+  waving:       { row: 1, frames: 8, fps: 6 },
+  review:       { row: 2, frames: 8, fps: 6 },
+  runningRight: { row: 3, frames: 8, fps: 8 },
+  jumping:      { row: 4, frames: 8, fps: 8 },
+  grab:         { row: 5, frames: 8, fps: 6 },
+  failed:       { row: 6, frames: 8, fps: 6 },
+  grabbing:     { row: 7, frames: 8, fps: 6 },
+  runningLeft:  { row: 8, frames: 8, fps: 8 },
+};
+
+// pet.json 完整结构（兼容 Codex 社区格式）
 export interface PetManifest {
-  name: string;
+  name?: string;       // 旧格式标识
+  id?: string;         // 社区格式标识（社区 pet.json 使用 id 而非 name）
   displayName: string;
-  description: string;
-  version: string;
-  sprite: PetSprite;
-  animations: Record<string, PetAnimation>;
+  description?: string;
+  version?: string;
+  spritesheetPath?: string;   // 社区格式 spritesheet 文件名
+  sprite?: PetSprite;         // 可选：缺失时使用 DEFAULT_SPRITE
+  animations?: Record<string, PetAnimation>;  // 可选：缺失时使用 DEFAULT_ANIMATIONS
+  author?: string;
+  tags?: string[];
+  source?: string;
+  sourceUrl?: string;
 }
 
 // 宠物运行时状态

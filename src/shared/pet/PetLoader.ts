@@ -1,48 +1,48 @@
-// pet.json 解析器 & 校验器 — 兼容 Codex Pet 格式
+// pet.json 解析器 & 校验器 — 兼容 Codex Pet 社区格式 + 旧完整格式
 import type { PetManifest, PetInstance } from './types';
+import { DEFAULT_SPRITE, DEFAULT_ANIMATIONS } from './types';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// 校验 pet.json 结构合法性
+// 校验 pet.json 结构合法性（兼容社区格式：sprite/animations 可选）
 export function validateManifest(json: unknown): PetManifest {
   const m = json as Record<string, unknown>;
   if (!m || typeof m !== 'object') {
     throw new Error('pet.json 格式无效：不是合法的 JSON 对象');
   }
-  if (typeof m.name !== 'string') {
-    throw new Error('pet.json 缺少 name 字段');
-  }
   if (typeof m.displayName !== 'string') {
     throw new Error('pet.json 缺少 displayName 字段');
   }
+  // name 或 id 至少有一个
+  if (typeof m.name !== 'string' && typeof m.id !== 'string') {
+    throw new Error('pet.json 缺少 name 或 id 字段');
+  }
 
+  // sprite 非必填，如存在则校验子字段
   const sprite = m.sprite as Record<string, unknown> | undefined;
-  if (!sprite || typeof sprite !== 'object') {
-    throw new Error('pet.json 缺少 sprite 元数据');
-  }
-  if (typeof sprite.width !== 'number' || sprite.width < 1) {
-    throw new Error('sprite.width 无效');
-  }
-  if (typeof sprite.height !== 'number' || sprite.height < 1) {
-    throw new Error('sprite.height 无效');
-  }
-  if (typeof sprite.columns !== 'number' || sprite.columns < 1) {
-    throw new Error('sprite.columns 无效');
-  }
-
-  const animations = m.animations as Record<string, unknown> | undefined;
-  if (!animations || typeof animations !== 'object' || !animations.idle) {
-    throw new Error('pet.json 必须至少包含 idle 动画');
-  }
-
-  // 校验每个动画配置
-  for (const [name, anim] of Object.entries(animations)) {
-    const a = anim as Record<string, unknown>;
-    if (typeof a.row !== 'number' || a.row < 0) {
-      throw new Error(`动画 "${name}" 的 row 无效`);
+  if (sprite) {
+    if (typeof sprite.width !== 'number' || sprite.width < 1) {
+      throw new Error('sprite.width 无效');
     }
-    if (typeof a.frames !== 'number' || a.frames < 1) {
-      throw new Error(`动画 "${name}" 的 frames 无效`);
+    if (typeof sprite.height !== 'number' || sprite.height < 1) {
+      throw new Error('sprite.height 无效');
+    }
+    if (typeof sprite.columns !== 'number' || sprite.columns < 1) {
+      throw new Error('sprite.columns 无效');
+    }
+  }
+
+  // animations 非必填，如存在则校验每个动画
+  const animations = m.animations as Record<string, unknown> | undefined;
+  if (animations) {
+    for (const [animName, anim] of Object.entries(animations)) {
+      const a = anim as Record<string, unknown>;
+      if (typeof a.row !== 'number' || a.row < 0) {
+        throw new Error(`动画 "${animName}" 的 row 无效`);
+      }
+      if (typeof a.frames !== 'number' || a.frames < 1) {
+        throw new Error(`动画 "${animName}" 的 frames 无效`);
+      }
     }
   }
 
@@ -52,7 +52,7 @@ export function validateManifest(json: unknown): PetManifest {
 // 校验 spritesheet 尺寸是否符合声明
 export function validateSpritesheet(
   spritesheetPath: string,
-  manifest: PetManifest,
+  _manifest: PetManifest,
 ): boolean {
   if (!fs.existsSync(spritesheetPath)) {
     throw new Error(`spritesheet 文件不存在: ${spritesheetPath}`);
@@ -61,11 +61,10 @@ export function validateSpritesheet(
   if (ext !== '.webp' && ext !== '.png') {
     throw new Error(`spritesheet 格式不支持: ${ext}，需要 .webp 或 .png`);
   }
-  // 尺寸校验在浏览器端进行（Node.js 无法读取图片尺寸）
   return true;
 }
 
-// 从宠物目录加载完整宠物
+// 从宠物目录加载完整宠物（社区格式缺失字段自动填充默认值）
 export function loadPet(petDir: string): { manifest: PetManifest; spritesheetPath: string } {
   const manifestPath = path.join(petDir, 'pet.json');
   if (!fs.existsSync(manifestPath)) {
@@ -75,7 +74,19 @@ export function loadPet(petDir: string): { manifest: PetManifest; spritesheetPat
   const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
   const manifest = validateManifest(raw);
 
-  const spritesheetPath = path.join(petDir, manifest.sprite.url || 'spritesheet.webp');
+  // 填充默认值（对齐 Codex 社区标准）
+  if (!manifest.sprite) {
+    manifest.sprite = { ...DEFAULT_SPRITE };
+    // 社区格式用 spritesheetPath 字段指定 spritesheet 文件名
+    if (raw.spritesheetPath) {
+      manifest.sprite.url = raw.spritesheetPath as string;
+    }
+  }
+  if (!manifest.animations || Object.keys(manifest.animations).length === 0) {
+    manifest.animations = { ...DEFAULT_ANIMATIONS };
+  }
+
+  const spritesheetPath = path.join(petDir, manifest.sprite.url);
   validateSpritesheet(spritesheetPath, manifest);
 
   return { manifest, spritesheetPath };
@@ -101,7 +112,7 @@ export function listInstalledPets(baseDir: string): PetInstance[] {
       const stat = fs.statSync(manifestPath);
       pets.push({
         id: entry.name,
-        name: manifest.displayName || manifest.name,
+        name: manifest.displayName || manifest.id || manifest.name || entry.name,
         path: petDir,
         manifest,
         isActive: false,
