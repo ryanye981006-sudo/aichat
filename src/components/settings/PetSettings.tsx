@@ -10,6 +10,7 @@ interface InstalledPet {
   description: string;
   version: string;
   installedAt: string;
+  spritesheetUrl?: string;
 }
 
 export default function PetSettings() {
@@ -64,7 +65,8 @@ export default function PetSettings() {
       eApi()?.petDeactivate();
     } else {
       setActivePetId(pet.id);
-      eApi()?.petActivate({ id: pet.id, name: pet.name, path: getPetPath(pet.id), zoom });
+      // 只传 id 和 zoom，路径和 manifest 由主进程解析
+      eApi()?.petActivate({ id: pet.id, zoom });
     }
   }
 
@@ -117,9 +119,6 @@ export default function PetSettings() {
     finally { setLoading(false); }
   }
 
-  function getPetPath(petId: string): string {
-    return '~/.aichat/pets/' + petId;
-  }
 
   return (
     <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
@@ -171,8 +170,16 @@ export default function PetSettings() {
                       ✓ 已启用
                     </span>
                   )}
-                  <div style={{ width: 72, height: 72, borderRadius: 'var(--radius-xl)', background: 'linear-gradient(135deg, var(--sidebar-bg), #e8ecf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>
-                    🐾
+                  <div style={{ width: 72, height: 72, borderRadius: 'var(--radius-xl)', background: 'linear-gradient(135deg, var(--sidebar-bg), #e8ecf6)', overflow: 'hidden', flexShrink: 0 }}>
+                    {pet.spritesheetUrl ? (
+                      <img src={pet.spritesheetUrl}
+                        alt={pet.name}
+                        style={{ width: 576, height: 702, display: 'block' }}
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32 }}>🐾</div>
+                    )}
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--fg)' }}>
                     {pet.name}

@@ -225,6 +225,36 @@ app.whenReady().then(() => {
     }
   });
 
+  // 加载宠物完整数据（解析路径 + manifest，社区缺失字段填充 Codex 默认值）
+  function loadPetData(petId) {
+    const home = process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~';
+    const petsDir = path.join(home, '.aichat', 'pets');
+    const petPath = path.join(petsDir, petId);
+    const manifestPath = path.join(petPath, 'pet.json');
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error(`找不到宠物: ${manifestPath}`);
+    }
+    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    if (!raw.sprite) {
+      raw.sprite = { url: 'spritesheet.webp', width: 192, height: 208, columns: 8, rows: 9 };
+      if (raw.spritesheetPath) raw.sprite.url = raw.spritesheetPath;
+    }
+    if (!raw.animations || Object.keys(raw.animations).length === 0) {
+      raw.animations = {
+        idle:         { row: 0, frames: 8, fps: 4 },
+        waving:       { row: 1, frames: 8, fps: 6 },
+        review:       { row: 2, frames: 8, fps: 6 },
+        runningRight: { row: 3, frames: 8, fps: 8 },
+        jumping:      { row: 4, frames: 8, fps: 8 },
+        grab:         { row: 5, frames: 8, fps: 6 },
+        failed:       { row: 6, frames: 8, fps: 6 },
+        grabbing:     { row: 7, frames: 8, fps: 6 },
+        runningLeft:  { row: 8, frames: 8, fps: 8 },
+      };
+    }
+    return { id: petId, path: petPath, manifest: raw };
+  }
+
   ipcMain.on('pet:activate', (_event, petData) => {
     if (petWindow && !petWindow.isDestroyed()) {
       petWindow.close();
@@ -233,8 +263,10 @@ app.whenReady().then(() => {
     const config = loadConfig();
     config.defaultPetId = petData.id;
     saveConfig(config);
+    const fullData = loadPetData(petData.id);
+    fullData.zoom = petData.zoom || 1.0;
     petWindow.webContents.on('did-finish-load', () => {
-      petWindow.webContents.send('pet:load', petData);
+      petWindow.webContents.send('pet:load', fullData);
     });
     startFullscreenDetection(mainWindow, petWindow);
   });
@@ -307,7 +339,7 @@ app.whenReady().then(() => {
       success: true,
       pet: {
         id: petName,
-        name: manifest.displayName || manifest.name,
+        name: manifest.displayName || manifest.id || manifest.name,
         description: manifest.description || '',
         version: manifest.version || '1.0.0',
         installedAt: new Date().toISOString(),
@@ -333,10 +365,16 @@ app.whenReady().then(() => {
   if (config.autoWakeOnStartup && config.defaultPetId) {
     setTimeout(() => {
       try {
+        const fullData = loadPetData(config.defaultPetId);
         petWindow = createPetWindow(mainWindow);
-        if (petWindow) startFullscreenDetection(mainWindow, petWindow);
+        if (petWindow) {
+          petWindow.webContents.on('did-finish-load', () => {
+            petWindow.webContents.send('pet:load', fullData);
+          });
+          startFullscreenDetection(mainWindow, petWindow);
+        }
       } catch (err) {
-        console.error('[Pet] 创建失败:', err.message);
+        console.error('[Pet] 自动唤醒失败:', err.message);
       }
     }, 3000);
   }
