@@ -181,11 +181,21 @@ router.post('/completions', async (req: Request, res: Response) => {
   const webSearchEnabled = web_search_enabled !== undefined ? !!web_search_enabled : webSearchService.isAvailable();
   // 记忆开关：前端请求参数优先，否则看全局设置
   const effectiveMemoryEnabled = memory_enabled !== undefined ? !!memory_enabled : globalMemoryEnabled;
+  // 知识库开关：服务端自动检测（有默认 KB 且有已完成文档）
+  const knowledgeEnabled = (() => {
+    const kb = db.prepare('SELECT id FROM knowledge_bases LIMIT 1').get() as any;
+    if (!kb) return false;
+    const doc = db.prepare(
+      "SELECT COUNT(*) as c FROM knowledge_documents WHERE knowledge_base_id = ? AND processing_status = 'completed'"
+    ).get(kb.id) as any;
+    return doc?.c > 0;
+  })();
 
-  // 构建记忆工具（含 execute 包装 + per-tool 调用上限）
+  // 构建工具（含 execute 包装 + per-tool 调用上限）
   const toolSchemas = toolDefinitionBuilder.buildTools({
     memoryEnabled: effectiveMemoryEnabled,
     webSearchEnabled,
+    knowledgeEnabled,
   });
   let tools: Record<string, any> | undefined;
   const toolCallCounts = new Map<string, number>();
@@ -525,10 +535,21 @@ router.post('/regenerate', async (req: Request, res: Response) => {
   const regenMemoryBool = memory_enabled !== undefined ? !!memory_enabled : globalMemoryEnabled;
   const regenMemoryEnabled = regenMemoryBool ? 1 : 0;
 
+  // 知识库开关：服务端自动检测（同 /completions）
+  const regenKnowledgeEnabled = (() => {
+    const kb = db.prepare('SELECT id FROM knowledge_bases LIMIT 1').get() as any;
+    if (!kb) return false;
+    const doc = db.prepare(
+      "SELECT COUNT(*) as c FROM knowledge_documents WHERE knowledge_base_id = ? AND processing_status = 'completed'"
+    ).get(kb.id) as any;
+    return doc?.c > 0;
+  })();
+
   // 构建工具（含 per-tool 调用上限）
   const regenToolSchemas = toolDefinitionBuilder.buildTools({
     memoryEnabled: regenMemoryBool,
     webSearchEnabled: regenWebSearchEnabled,
+    knowledgeEnabled: regenKnowledgeEnabled,
   });
   let regenTools: Record<string, any> | undefined;
   const regenToolCallCounts = new Map<string, number>();

@@ -6,11 +6,12 @@ import { z } from 'zod';
 export interface ToolsConfig {
   memoryEnabled: boolean;
   webSearchEnabled: boolean;
+  knowledgeEnabled: boolean;
 }
 
 export class ToolDefinitionBuilder {
   buildTools(opts: ToolsConfig): Record<string, any> | undefined {
-    const { memoryEnabled, webSearchEnabled } = opts;
+    const { memoryEnabled, webSearchEnabled, knowledgeEnabled } = opts;
     const tools: Record<string, any> = {};
 
     if (memoryEnabled) {
@@ -32,6 +33,16 @@ export class ToolDefinitionBuilder {
         parameters: z.object({
           memory_id: z.string().describe('记忆 ID'),
           source_ids: z.array(z.string()).optional().describe('指定要获取的 source ID 列表，不传则返回全部'),
+        }),
+      };
+    }
+
+    if (knowledgeEnabled) {
+      tools.search_knowledge = {
+        description: '搜索知识库中的文档内容。知识库中包含用户上传的 PDF、Word、TXT、Markdown 等参考文档。当用户询问关于已上传文档的内容、需要引用文档中的信息、或提到"之前上传的文件""文档里说"等时使用此工具搜索。可以一次提供多个查询角度并行检索。',
+        parameters: z.object({
+          queries: z.array(z.string()).describe('搜索关键词列表，每个是自然语言检索词。建议 1-3 个不同角度的查询以提升召回率'),
+          limit: z.number().optional().default(5).describe('返回条数，默认 5'),
         }),
       };
     }

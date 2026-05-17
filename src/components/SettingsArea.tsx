@@ -5,6 +5,7 @@ import { providersApi, modelsApi } from '../services/api';
 import SettingsShell, { type SettingsTab } from './settings/SettingsShell';
 import ModelSettings from './settings/ModelSettings';
 import MemorySettings from './settings/MemorySettings';
+import KnowledgeSettings from './settings/KnowledgeSettings';
 import ToolsSettings from './settings/ToolsSettings';
 import PetSettings from './settings/PetSettings';
 
@@ -32,6 +33,8 @@ export default function SettingsArea({ activeTab, onClose }: SettingsAreaProps) 
         return <ModelSettings />;
       case 'memory':
         return <MemorySettings />;
+      case 'knowledge':
+        return <KnowledgeSettings />;
       case 'tools':
         return <ToolsSettings providers={providers} models={models} />;
       case 'pet':

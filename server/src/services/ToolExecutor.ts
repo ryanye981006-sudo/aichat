@@ -1,5 +1,6 @@
 // 工具调用分发器：接收 LLM 工具调用，分发到对应的服务执行
 
+import { knowledgeService } from './KnowledgeService.js';
 import { memoryRetrievalService } from './MemoryRetrievalService.js';
 import { webSearchService } from './WebSearchService.js';
 
@@ -60,6 +61,22 @@ export class ToolExecutor {
       }
       case 'web_fetch':
         return webSearchService.fetchPage(args.url, args.mode || 'basic');
+      case 'search_knowledge': {
+        const queries = this.normalizeQueries(args, fallbackQuery);
+        if (queries.length === 0) return [];
+        const limit = args.limit ?? 5;
+        const allResults = await Promise.all(queries.map(q =>
+          knowledgeService.searchKnowledge(q, limit)
+        ));
+        // 按 chunk_id 去重
+        const seen = new Map<string, any>();
+        for (const results of allResults) {
+          for (const r of results) {
+            if (!seen.has(r.chunk_id)) seen.set(r.chunk_id, r);
+          }
+        }
+        return [...seen.values()].slice(0, limit);
+      }
       default:
         return { error: `未知工具: ${toolName}` };
     }

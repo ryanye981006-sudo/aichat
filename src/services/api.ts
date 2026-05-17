@@ -90,6 +90,24 @@ export const toolsApi = {
     request<{ success: boolean }>('/tools/reranker-config', { method: 'PUT', body: JSON.stringify(data) }),
 };
 
+// ===== 知识库 API =====
+export const knowledgeApi = {
+  listDocuments: () => request<any[]>('/knowledge/documents'),
+  uploadDocuments: async (files: File[]) => {
+    const formData = new FormData();
+    files.forEach(f => formData.append('files', f));
+    const res = await fetch(`${BASE_URL}/knowledge/documents`, { method: 'POST', body: formData });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || '上传失败');
+    }
+    return res.json() as Promise<{ success: boolean; results: { docId: string; fileName: string; error?: string }[] }>;
+  },
+  deleteDocument: (id: string) => request<{ success: boolean }>(`/knowledge/documents/${id}`, { method: 'DELETE' }),
+  search: (query: string, topK?: number) =>
+    request<{ results: any[] }>('/knowledge/search', { method: 'POST', body: JSON.stringify({ query, topK: topK ?? 5 }) }),
+};
+
 // ===== 聊天文件上传 API =====
 // ===== 全局设置 API =====
 export const settingsApi = {

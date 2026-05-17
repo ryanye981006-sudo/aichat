@@ -66,6 +66,15 @@ const TOOL_DISPLAY_CONFIG: Record<string, {
       return `读取了 ${r?.title || '网页全文'}`;
     },
   },
+  search_knowledge: {
+    icon: '📚',
+    colorClass: 'tool-amber',
+    runningText: '搜索知识库中...',
+    doneText: (r: any) => {
+      const count = Array.isArray(r) ? r.length : 0;
+      return `从知识库找到 ${count} 条相关内容`;
+    },
+  },
 };
 
 function computeDuration(startedAt?: string, completedAt?: string): string {
@@ -131,6 +140,34 @@ function MemorySearchDetail({ result }: { result: any }) {
   );
 }
 
+// 渲染 search_knowledge 结果详情
+function KnowledgeSearchDetail({ result }: { result: any }) {
+  const items = Array.isArray(result) ? result : [];
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      {items.map((item: any, idx: number) => (
+        <div key={item.chunk_id || idx} className="rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'var(--border-soft)' }}>
+          <div className="font-medium" style={{ color: 'var(--fg)' }}>
+            {item.content?.length > 200 ? item.content.slice(0, 200) + '...' : item.content}
+          </div>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-[10px] opacity-50" style={{ color: 'var(--muted-soft)' }}>
+              {item.document_name}
+            </span>
+            {item.score !== undefined && (
+              <span className="text-[10px] opacity-50" style={{ color: 'var(--muted-soft)' }}>
+                相似度: {(Number(item.score) * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function ToolCallBlock({ toolCall, depth = 0 }: { toolCall: ToolCallEntry; depth?: number }) {
   const config = TOOL_DISPLAY_CONFIG[toolCall.toolName];
   const [expanded, setExpanded] = useState(false);
@@ -182,6 +219,7 @@ export default function ToolCallBlock({ toolCall, depth = 0 }: { toolCall: ToolC
         <>
           {toolCall.toolName === 'web_search' && <WebSearchDetail result={toolCall.result} />}
           {toolCall.toolName === 'search_memory' && <MemorySearchDetail result={toolCall.result} />}
+          {toolCall.toolName === 'search_knowledge' && <KnowledgeSearchDetail result={toolCall.result} />}
           {toolCall.toolName === 'web_fetch' && (
             <div className="mt-2 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: 'var(--border-soft)' }}>
               <div className="font-medium" style={{ color: 'var(--fg)' }}>

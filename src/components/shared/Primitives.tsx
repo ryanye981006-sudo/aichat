@@ -140,6 +140,20 @@ export function BtnDanger(props: { disabled?: boolean; onClick?: () => void; cla
   );
 }
 
+// ===== SettingBlock 设置页分组容器 =====
+export function SettingBlock({ label, desc, saved, children }: { label: string; desc: string; saved?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div className="setting-group-label">{label}</div>
+      <p style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)', marginBottom: 8 }}>{desc}</p>
+      {children}
+      {saved && (
+        <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)', marginLeft: 8 }}>已保存</span>
+      )}
+    </div>
+  );
+}
+
 // ===== FormInput (focus 光环效果) =====
 export function FormInput({ value, onChange, placeholder, type = 'text', disabled, rows, style: extraStyle, ...rest }: {
   value: string;

@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Provider, Model } from '../../types';
 import { toolsApi, memoryApi, settingsApi } from '../../services/api';
-import { Toggle, BtnPrimary } from '../shared/Primitives';
+import { SettingBlock, Toggle, BtnPrimary } from '../shared/Primitives';
 import { ChevronDown, Eye, EyeOff, Search, CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 interface ToolsSettingsProps {
@@ -213,21 +213,6 @@ export default function ToolsSettings({ providers, models }: ToolsSettingsProps)
           </div>
         )}
       </SettingBlock>
-    </div>
-  );
-}
-
-// ===== 内联组件 =====
-
-function SettingBlock({ label, desc, saved, children }: { label: string; desc: string; saved?: boolean; children: React.ReactNode }) {
-  return (
-    <div style={{ marginBottom: 28 }}>
-      <div className="setting-group-label">{label}</div>
-      <p style={{ fontSize: 11, color: 'var(--muted-soft)', fontFamily: 'var(--font-body)', marginBottom: 8 }}>{desc}</p>
-      {children}
-      {saved && (
-        <span style={{ fontSize: 11, color: 'var(--success)', fontFamily: 'var(--font-body)', marginLeft: 8 }}>已保存</span>
-      )}
     </div>
   );
 }

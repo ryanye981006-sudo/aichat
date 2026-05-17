@@ -23,7 +23,7 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingConversationId, setStreamingConversationId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'model' | 'memory' | 'tools'>('model');
+  const [settingsTab, setSettingsTab] = useState<'model' | 'memory' | 'knowledge' | 'tools' | 'pet'>('model');
   const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   // 窗口预览模式（开发阶段模拟 Electron 窗口效果）

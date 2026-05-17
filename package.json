@@ -13,8 +13,7 @@
     "build:server": "tsc -p tsconfig.server.json && node -e \"require('fs').cpSync('server/src/db/migrations','server-dist/src/db/migrations',{recursive:true})\"",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit",
-    "eval": "tsx server/src/eval/cli.ts"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.45",
