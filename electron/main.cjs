@@ -213,13 +213,21 @@ app.whenReady().then(function () {
   // 宠物 IPC
   ipcMain.on('pet:activate', function (_event, petData) {
     logger.info('Main', 'pet:activate: ' + JSON.stringify(petData));
-    var overlay = createPetOverlay();
     var config = loadPetConfig();
     config.defaultPetId = petData.id;
     savePetConfig(config);
     var fullData = loadPetData(petData.id);
     fullData.zoom = petData.zoom || 1.0;
     fullData.config = config;
+
+    // 复用已有 overlay，避免重建窗口的延迟
+    if (petOverlay && !petOverlay.isDestroyed()) {
+      logger.info('Main', '复用已有 overlay，直接发送 pet:load');
+      petOverlay.webContents.send('pet:load', fullData);
+      return;
+    }
+
+    var overlay = createPetOverlay();
     overlay.webContents.on('did-finish-load', function () {
       logger.info('Main', 'pet.html 加载完成, 发送 pet:load');
       overlay.webContents.send('pet:load', fullData);

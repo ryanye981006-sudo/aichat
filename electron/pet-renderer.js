@@ -168,6 +168,7 @@
 
     if (!isRunning) {
       isRunning = true;
+      cancelAnimationFrame(animFrameId);
       tick._lastTime = performance.now();
       animFrameId = requestAnimationFrame(tick);
     }
@@ -209,8 +210,24 @@
   setInterval(updateIdlePhase, 1000);
 
   // === 加载宠物 ===
+  var loadId = 0;   // 递增，防止切换宠物后旧异步回调覆盖新数据
+
   function loadPet(petData) {
-    petLog('INFO', 'loadPet: id="' + petData.id + '", name="' + petData.name + '"');
+    var myLoadId = ++loadId;
+    petLog('INFO', 'loadPet #' + myLoadId + ': id="' + petData.id + '", name="' + petData.name + '"');
+
+    // 立即停止当前动画，清空画布显示加载中
+    isRunning = false;
+    cancelAnimationFrame(animFrameId);
+    currentAnimation = null;
+    spritesheet = null;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(136, 153, 184, 0.4)';
+    ctx.font = '20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🐾', canvas.width / 2, canvas.height / 2);
+    ctx.textAlign = 'start';
+
     petManifest = petData.manifest;
     scale = petData.zoom || 1.0;
 
@@ -234,34 +251,36 @@
     petLog('INFO', '加载 spritesheet: ' + ssPath);
 
     api.petReadFile(ssPath).then(function (result) {
+      if (myLoadId !== loadId) { petLog('INFO', '忽略过期加载结果 #' + myLoadId); return; }
       if (!result || !result.ok) {
         petLog('ERROR', '读取失败: ' + (result ? result.error : 'unknown'));
-        // 回退 HTTP
         var fallback = petData.spritesheetUrl;
-        if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback); }
+        if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback, myLoadId); }
         return;
       }
-      // Buffer → Uint8Array → Blob → Object URL
       var buf = new Uint8Array(result.data);
       var mime = ssPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/webp';
       var blob = new Blob([buf], { type: mime });
       var blobUrl = URL.createObjectURL(blob);
       petLog('INFO', 'Blob URL 已创建: ' + blobUrl.substring(0, 40) + '...');
-      loadImage(blobUrl);
+      loadImage(blobUrl, myLoadId);
     }).catch(function (err) {
+      if (myLoadId !== loadId) return;
       petLog('ERROR', 'IPC 读取异常: ' + err.message);
       var fallback = petData.spritesheetUrl;
-      if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback); }
+      if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback, myLoadId); }
     });
 
-    function loadImage(url) {
+    function loadImage(url, expectedLoadId) {
       var img = new Image();
       img.onload = function () {
+        if (expectedLoadId !== loadId) { petLog('INFO', '忽略过期图片 #' + expectedLoadId); return; }
         petLog('INFO', 'spritesheet 加载成功! ' + img.width + 'x' + img.height);
         spritesheet = img;
         setState('idle');
       };
       img.onerror = function () {
+        if (expectedLoadId !== loadId) return;
         petLog('ERROR', 'spritesheet 加载失败: ' + url.substring(0, 60));
       };
       img.src = url;

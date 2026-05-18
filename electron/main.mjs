@@ -332,13 +332,21 @@ app.whenReady().then(() => {
 
   ipcMain.on('pet:activate', (_event, petData) => {
     logger.info('Main', `pet:activate 收到请求: ${JSON.stringify(petData)}`);
-    const overlay = createPetOverlay();
     const config = loadPetConfig();
     config.defaultPetId = petData.id;
     savePetConfig(config);
     const fullData = loadPetData(petData.id);
     fullData.zoom = petData.zoom || 1.0;
     fullData.config = config;
+
+    // 复用已有 overlay，避免重建窗口的延迟
+    if (petOverlay && !petOverlay.isDestroyed()) {
+      logger.info('Main', '复用已有 overlay，直接发送 pet:load');
+      petOverlay.webContents.send('pet:load', fullData);
+      return;
+    }
+
+    const overlay = createPetOverlay();
     overlay.webContents.on('did-finish-load', () => {
       logger.info('Main', 'pet.html 加载完成, 发送 pet:load 数据');
       overlay.webContents.send('pet:load', fullData);
