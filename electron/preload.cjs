@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   petImportFromURL: (url) => ipcRenderer.invoke('pet:import-url', url),
   petListInstalled: () => ipcRenderer.invoke('pet:list-installed'),
   petImportLocal: (sourceDir) => ipcRenderer.invoke('pet:import-local', sourceDir),
+  petTailLog: (lines) => ipcRenderer.invoke('pet:tail-log', lines || 50),
 
   // ---- 宠物状态事件（宠物渲染进程使用） ----
   onPetEvent: (callback) => {

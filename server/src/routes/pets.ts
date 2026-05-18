@@ -27,10 +27,13 @@ function getSpritesheetName(petId: string): string {
 router.get('/', (_req, res) => {
   try {
     const dir = petsDir();
+    console.log('[PetsAPI] GET / 扫描目录:', dir);
     if (!fs.existsSync(dir)) {
+      console.log('[PetsAPI] 目录不存在:', dir);
       return res.json([]);
     }
     const entries = fs.readdirSync(dir, { withFileTypes: true });
+    console.log('[PetsAPI] 目录条目:', entries.length);
     const pets = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -38,20 +41,24 @@ router.get('/', (_req, res) => {
       if (!fs.existsSync(manifestPath)) continue;
       try {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-        pets.push({
+        const pet = {
           id: entry.name,
           name: manifest.displayName || manifest.id || manifest.name,
           description: manifest.description || '',
           version: manifest.version || '1.0.0',
           installedAt: fs.statSync(manifestPath).mtime.toISOString(),
           spritesheetUrl: `/api/pets/${entry.name}/spritesheet`,
-        });
+        };
+        pets.push(pet);
+        console.log('[PetsAPI] 发现宠物:', entry.name, pet.name, '| spritesheetUrl:', pet.spritesheetUrl);
       } catch {
         // 跳过损坏的
       }
     }
+    console.log('[PetsAPI] 返回', pets.length, '个宠物');
     res.json(pets.sort((a: any, b: any) => a.name.localeCompare(b.name)));
   } catch (err: any) {
+    console.error('[PetsAPI] 错误:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -60,12 +67,16 @@ router.get('/', (_req, res) => {
 router.get('/:id/spritesheet', (req, res) => {
   try {
     const petId = req.params.id;
+    console.log('[PetsAPI] GET /' + petId + '/spritesheet');
     if (!SAFE_ID.test(petId)) {
+      console.log('[PetsAPI] 无效 ID:', petId);
       return res.status(400).json({ error: '无效的宠物 ID' });
     }
     const ssName = getSpritesheetName(petId);
     const ssPath = path.join(petsDir(), petId, ssName);
+    console.log('[PetsAPI] spritesheet 路径:', ssPath, ', 存在:', fs.existsSync(ssPath));
     if (!fs.existsSync(ssPath)) {
+      console.log('[PetsAPI] spritesheet 不存在:', ssPath);
       return res.status(404).json({ error: 'spritesheet 不存在' });
     }
     const ext = path.extname(ssName).toLowerCase();
@@ -74,6 +85,7 @@ router.get('/:id/spritesheet', (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=3600');
     fs.createReadStream(ssPath).pipe(res);
   } catch (err: any) {
+    console.error('[PetsAPI] 错误:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -4,8 +4,51 @@
 (function () {
   'use strict';
 
+  // 调试日志收集（显示在 DOM 中，方便客户端查看）
+  const debugLines = [];
+  const MAX_DEBUG_LINES = 50;
+  function petLog(tag, msg) {
+    const ts = new Date().toISOString().slice(11, 23);
+    const line = '[' + ts + '] [' + tag + '] ' + msg;
+    console.log('[Pet] ' + line);
+    debugLines.push(line);
+    if (debugLines.length > MAX_DEBUG_LINES) debugLines.shift();
+    updateDebugOverlay();
+  }
+
+  let debugOverlay = null;
+  function updateDebugOverlay() {
+    if (!debugOverlay) return;
+    debugOverlay.textContent = debugLines.join('\n');
+  }
+
+  function showDebugOverlay() {
+    if (debugOverlay) return;
+    debugOverlay = document.createElement('div');
+    debugOverlay.id = 'pet-debug-overlay';
+    Object.assign(debugOverlay.style, {
+      position: 'fixed', bottom: '0', left: '0', right: '0',
+      maxHeight: '120px', overflowY: 'auto',
+      background: 'rgba(0,0,0,0.75)', color: '#0f0',
+      fontFamily: 'monospace', fontSize: '9px', lineHeight: '1.4',
+      padding: '4px 6px', zIndex: '9999',
+      pointerEvents: 'none', whiteSpace: 'pre-wrap',
+      borderTop: '1px solid rgba(255,255,255,0.15)',
+    });
+    document.body.appendChild(debugOverlay);
+    updateDebugOverlay();
+  }
+
+  // 启动时显示调试面板（方便客户端查看日志）
+  showDebugOverlay();
+
   const api = window.electronAPI;
-  if (!api) { console.error('[Pet] electronAPI 不可用'); return; }
+  if (!api) {
+    petLog('ERROR', 'electronAPI 不可用！可能 preload 未加载');
+    console.error('[Pet] electronAPI 不可用');
+    return;
+  }
+  petLog('INFO', 'pet-renderer 启动, electronAPI 可用');
 
   // Codex 社区标准默认精灵配置（1536×1872 spritesheet, 8×9 grid, 192×208 帧）
   const DEFAULT_SPRITE = {
@@ -238,39 +281,56 @@
   // ============ 加载宠物 ============
   function loadPet(petData) {
     // petData: { id, name, path, manifest }
+    petLog('INFO', 'loadPet 被调用: id="' + petData.id + '", name="' + petData.name + '", path="' + petData.path + '"');
     petPath = petData.path;
     petManifest = petData.manifest;
     scale = petData.zoom || 1.0;
 
     // 填充社区格式缺失的默认值
     if (!petManifest.sprite) {
+      petLog('INFO', 'sprite 缺失，填充 Codex 默认值');
       petManifest.sprite = { ...DEFAULT_SPRITE };
     }
     // 社区格式用 spritesheetPath 字段指定文件名
     if (petManifest.spritesheetPath && !petManifest.sprite.url) {
+      petLog('INFO', '使用 spritesheetPath: "' + petManifest.spritesheetPath + '"');
       petManifest.sprite.url = petManifest.spritesheetPath;
     }
     if (!petManifest.animations || Object.keys(petManifest.animations).length === 0) {
+      petLog('INFO', 'animations 缺失，填充 Codex 默认值');
       petManifest.animations = { ...DEFAULT_ANIMATIONS };
     }
+
+    petLog('INFO', 'sprite 配置: ' + JSON.stringify(getSprite()));
+    petLog('INFO', 'animations keys: ' + Object.keys(getAnimations()).join(', '));
 
     resizeCanvas();
 
     // 加载 spritesheet
     const img = new Image();
+    const ssPath = petPath + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp');
+    // Windows 路径转换
+    const ssUrl = 'file:///' + ssPath.replace(/\\/g, '/').replace(/^\//, '');
+    petLog('INFO', '加载 spritesheet: ' + ssUrl);
+
     img.onload = function () {
+      petLog('INFO', 'spritesheet 加载成功! ' + img.width + 'x' + img.height);
       spritesheet = img;
       // 开始播放 idle 动画
       setState('idle');
     };
     img.onerror = function () {
-      console.error('[Pet] spritesheet 加载失败:', petPath);
+      petLog('ERROR', 'spritesheet 加载失败! 路径: ' + ssUrl);
+      // 在 canvas 上显示错误信息
+      ctx.fillStyle = 'rgba(255,80,80,0.9)';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('spritesheet 加载失败', canvas.width / 2, canvas.height / 2 - 10);
+      ctx.fillText(ssPath.replace(/\\/g, '/').split('/').pop(), canvas.width / 2, canvas.height / 2 + 10);
+      ctx.textAlign = 'start';
     };
 
-    // spritesheet 路径（通过 file:// 协议加载）
-    const ssPath = petPath + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp');
-    // Windows 路径转换
-    img.src = 'file:///' + ssPath.replace(/\\/g, '/').replace(/^\//, '');
+    img.src = ssUrl;
   }
 
   // ============ 鼠标交互 ============
@@ -383,11 +443,16 @@
 
   // ============ IPC 事件监听 ============
   api.onPetLoad(function (petData) {
+    petLog('INFO', '收到 pet:load 事件: id="' + petData.id + '"');
     loadPet(petData);
   });
 
   api.onPetEvent(function (event) {
-    if (!petManifest) return;
+    petLog('DEBUG', '收到 pet:event: ' + event.type);
+    if (!petManifest) {
+      petLog('WARN', 'pet:event 被忽略: manifest 未加载');
+      return;
+    }
 
     switch (event.type) {
       case 'session:user-input-start':
