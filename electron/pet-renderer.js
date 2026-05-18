@@ -300,7 +300,7 @@
     if (cached && cached.img) {
       petLog('INFO', '缓存命中: ' + petData.id + ' → 免 IPC + 免解码');
       spritesheet = cached.img;
-      setState('idle');
+      startIdleAnimation();
       return;
     }
 
@@ -322,7 +322,7 @@
       var blobUrl = URL.createObjectURL(blob);
       currentBlobUrl = blobUrl;
       petLog('INFO', 'Blob URL 已创建: ' + blobUrl.substring(0, 40) + '...');
-      decodeSpritesheet(blobUrl, myLoadId);
+      decodeSpritesheet(blob, blobUrl, myLoadId);
     }).catch(function (err) {
       if (myLoadId !== loadId) return;
       petLog('ERROR', 'IPC 读取异常: ' + err.message);
@@ -330,26 +330,23 @@
       if (fallback) loadWithFallback(fallback, myLoadId);
     });
 
-    // === createImageBitmap GPU 解码（优先），失败回退 Image ===
-    function decodeSpritesheet(url, expectedLoadId) {
+    // createImageBitmap 优先（直接传 Blob，免 fetch），失败回退 Image
+    function decodeSpritesheet(blob, fallbackUrl, expectedLoadId) {
       if (typeof createImageBitmap === 'function') {
-        fetch(url).then(function (resp) { return resp.blob(); })
-          .then(function (blob) {
-            return createImageBitmap(blob, { imageOrientation: 'none', premultiplyAlpha: 'premultiply' });
-          })
+        createImageBitmap(blob, { imageOrientation: 'none', premultiplyAlpha: 'premultiply' })
           .then(function (bitmap) {
             if (expectedLoadId !== loadId) { bitmap.close(); return; }
             petLog('INFO', 'createImageBitmap GPU 解码成功: ' + bitmap.width + 'x' + bitmap.height);
-            onDecodeDone(bitmap, url, expectedLoadId);
+            onDecodeDone(bitmap, fallbackUrl, expectedLoadId);
           })
           .catch(function () {
             if (expectedLoadId !== loadId) return;
             petLog('WARN', 'createImageBitmap 失败，回退 Image');
-            loadWithFallback(url, expectedLoadId);
+            loadWithFallback(fallbackUrl, expectedLoadId);
           });
         return;
       }
-      loadWithFallback(url, expectedLoadId);
+      loadWithFallback(fallbackUrl, expectedLoadId);
     }
 
     function loadWithFallback(url, expectedLoadId) {
@@ -382,8 +379,16 @@
       }
       spritesheetCache.set(petData.id, { img: img, blobUrl: url });
 
-      setState('idle');
+      startIdleAnimation();
     }
+  }
+
+  // 绕过 transitionState 的状态检查，直接启动 idle 动画
+  function startIdleAnimation() {
+    currentState = 'idle';
+    idleTimeStart = performance.now();
+    idlePhase = 'active';
+    playAnimation('idle', {});
   }
 
   // === 鼠标交互 ===
