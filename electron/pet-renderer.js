@@ -36,7 +36,13 @@
 
   // === DOM ===
   const canvas = document.getElementById('pet-canvas');
-  const ctx = canvas.getContext('2d', { alpha: true });
+  const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+
+  // 离屏 Canvas 双缓冲：先在离屏绘制整帧，再一次 blit 到可见画布，消除闪烁
+  const offscreen = document.createElement('canvas');
+  offscreen.width = 192;
+  offscreen.height = 208;
+  const offCtx = offscreen.getContext('2d', { alpha: true });
 
   // === 运行时状态 ===
   let spritesheet = null;
@@ -99,29 +105,31 @@
     var sprite = getSprite();
     canvas.width = sprite.width;
     canvas.height = sprite.height;
+    offscreen.width = sprite.width;
+    offscreen.height = sprite.height;
     applyPosition();
   }
 
-  // === 精灵图渲染 ===
+  // === 精灵图渲染（离屏双缓冲：一次 blit，消除 clearRect→drawImage 间隙闪烁） ===
   function drawFrame() {
     if (!petManifest || !spritesheet || !currentAnimation) return;
     var sprite = getSprite();
     var col = currentFrame % sprite.columns;
     var row = currentAnimation.row;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    if (idlePhase === 'sleep') {
-      ctx.globalAlpha = 0.6;
-    }
-
-    ctx.drawImage(
+    // 离屏绘制
+    offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+    if (idlePhase === 'sleep') offCtx.globalAlpha = 0.6;
+    offCtx.drawImage(
       spritesheet,
       col * sprite.width, row * sprite.height, sprite.width, sprite.height,
       0, 0, sprite.width, sprite.height
     );
+    offCtx.globalAlpha = 1.0;
 
-    ctx.globalAlpha = 1.0;
+    // 一次 blit 到可见画布
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offscreen, 0, 0);
   }
 
   function tick(now) {
@@ -270,12 +278,14 @@
     releaseSpritesheet();
 
     // 清空画布显示加载中
+    offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+    offCtx.fillStyle = 'rgba(136, 153, 184, 0.4)';
+    offCtx.font = '20px sans-serif';
+    offCtx.textAlign = 'center';
+    offCtx.fillText('🐾', offscreen.width / 2, offscreen.height / 2);
+    offCtx.textAlign = 'start';
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = 'rgba(136, 153, 184, 0.4)';
-    ctx.font = '20px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('🐾', canvas.width / 2, canvas.height / 2);
-    ctx.textAlign = 'start';
+    ctx.drawImage(offscreen, 0, 0);
 
     petManifest = petData.manifest;
     scale = petData.zoom || 1.0;
@@ -434,7 +444,7 @@
           clearHoverTimer();
           api.sendDragEnd();   // → setIgnoreMouseEvents(true)，恢复穿透
           exitDebounceTimer = null;
-        }, 150);
+        }, 300);
       }
     }
 
@@ -548,17 +558,20 @@
   // === 启动 ===
   canvas.width = 192;
   canvas.height = 208;
+  offscreen.width = 192;
+  offscreen.height = 208;
   canvas.style.position = 'absolute';
   canvas.style.left = '0';
   canvas.style.top = '0';
   canvas.style.willChange = 'transform';
   setInitialPosition(null);  // 默认右下角
 
-  ctx.fillStyle = 'rgba(136, 153, 184, 0.4)';
-  ctx.font = '20px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('🐾', canvas.width / 2, canvas.height / 2);
-  ctx.textAlign = 'start';
+  offCtx.fillStyle = 'rgba(136, 153, 184, 0.4)';
+  offCtx.font = '20px sans-serif';
+  offCtx.textAlign = 'center';
+  offCtx.fillText('🐾', offscreen.width / 2, offscreen.height / 2);
+  offCtx.textAlign = 'start';
+  ctx.drawImage(offscreen, 0, 0);
 
   petLog('INFO', 'pet-renderer 就绪');
 })();
