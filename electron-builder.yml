@@ -37,3 +37,6 @@ extraResources:
   # 后端生产依赖（仅 server/node_modules，不含前端和构建工具）
   - from: server/node_modules
     to: node_modules
+  # 预置桌宠（首启自动安装到 ~/.aichat/pets/）
+  - from: assets/pets
+    to: preset-pets

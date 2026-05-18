@@ -416,6 +416,49 @@ app.whenReady().then(() => {
     return logger.tail(lines);
   });
 
+  // 首启：将预置社区桌宠安装到 ~/.aichat/pets/
+  function installPresetPets() {
+    const home = process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~';
+    const petsDir = path.join(home, '.aichat', 'pets');
+
+    // 生产模式：从 resources/preset-pets/ 读取；开发模式：从项目 assets/pets/ 读取
+    const presetDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'preset-pets')
+      : path.join(__dirname, '..', 'assets', 'pets');
+
+    logger.info('Main', `installPresetPets: presetDir="${presetDir}", petsDir="${petsDir}"`);
+
+    if (!fs.existsSync(presetDir)) {
+      logger.warn('Main', `预置宠物目录不存在: "${presetDir}"`);
+      return;
+    }
+
+    if (!fs.existsSync(petsDir)) {
+      fs.mkdirSync(petsDir, { recursive: true });
+    }
+
+    const presetEntries = fs.readdirSync(presetDir, { withFileTypes: true });
+    let installedCount = 0;
+    for (const entry of presetEntries) {
+      if (!entry.isDirectory()) continue;
+      const destDir = path.join(petsDir, entry.name);
+      if (fs.existsSync(destDir)) {
+        logger.debug('Main', `跳过预置宠物 "${entry.name}": 已存在`);
+        continue;
+      }
+      try {
+        fs.cpSync(path.join(presetDir, entry.name), destDir, { recursive: true });
+        logger.info('Main', `预置宠物已安装: "${entry.name}"`);
+        installedCount++;
+      } catch (err) {
+        logger.error('Main', `安装预置宠物 "${entry.name}" 失败: ${err.message}`);
+      }
+    }
+    logger.info('Main', `预置宠物安装完成，新安装 ${installedCount} 个`);
+  }
+
+  installPresetPets();
+
   createTray();
   startServer();
   setTimeout(createWindow, 2000);
