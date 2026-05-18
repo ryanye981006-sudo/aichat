@@ -4,51 +4,17 @@
 (function () {
   'use strict';
 
-  // 调试日志收集（显示在 DOM 中，方便客户端查看）
-  const debugLines = [];
-  const MAX_DEBUG_LINES = 50;
+  // 后台日志（仅输出到 console，运行时可查看 DevTools 或主进程日志文件）
   function petLog(tag, msg) {
-    const ts = new Date().toISOString().slice(11, 23);
-    const line = '[' + ts + '] [' + tag + '] ' + msg;
-    console.log('[Pet] ' + line);
-    debugLines.push(line);
-    if (debugLines.length > MAX_DEBUG_LINES) debugLines.shift();
-    updateDebugOverlay();
+    console.log('[Pet][' + tag + '] ' + msg);
   }
-
-  let debugOverlay = null;
-  function updateDebugOverlay() {
-    if (!debugOverlay) return;
-    debugOverlay.textContent = debugLines.join('\n');
-  }
-
-  function showDebugOverlay() {
-    if (debugOverlay) return;
-    debugOverlay = document.createElement('div');
-    debugOverlay.id = 'pet-debug-overlay';
-    Object.assign(debugOverlay.style, {
-      position: 'fixed', bottom: '0', left: '0',
-      maxWidth: '100%', maxHeight: '48px', overflowY: 'auto',
-      background: 'rgba(0,0,0,0.55)', color: '#0f0',
-      fontFamily: 'monospace', fontSize: '7px', lineHeight: '1.3',
-      padding: '2px 4px', zIndex: '9999',
-      pointerEvents: 'none', whiteSpace: 'pre-wrap',
-      borderTop: '1px solid rgba(255,255,255,0.1)',
-    });
-    document.body.appendChild(debugOverlay);
-    updateDebugOverlay();
-  }
-
-  // 启动时显示调试面板（方便客户端查看日志）
-  showDebugOverlay();
 
   const api = window.electronAPI;
   if (!api) {
-    petLog('ERROR', 'electronAPI 不可用！可能 preload 未加载');
     console.error('[Pet] electronAPI 不可用');
     return;
   }
-  petLog('INFO', 'pet-renderer 启动, electronAPI 可用');
+  petLog('INFO', 'pet-renderer 启动');
 
   // Codex 社区标准默认精灵配置（1536×1872 spritesheet, 8×9 grid, 192×208 帧）
   const DEFAULT_SPRITE = {

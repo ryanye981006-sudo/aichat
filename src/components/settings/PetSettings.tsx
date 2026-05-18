@@ -27,69 +27,45 @@ export default function PetSettings() {
 
   const [electronOk, setElectronOk] = useState(true);
   const [electronDebug, setElectronDebug] = useState('');
-  const [logLines, setLogLines] = useState('');
 
   useEffect(() => { loadPets(); }, []);
-  // 每 3 秒拉取主进程日志
-  useEffect(() => {
-    const api = eApi();
-    if (!api?.petTailLog) return;
-    const timer = setInterval(async () => {
-      try {
-        const lines = await api.petTailLog(30);
-        setLogLines(lines);
-      } catch { /* 忽略 */ }
-    }, 3000);
     return () => clearInterval(timer);
   }, []);
 
   async function loadPets() {
-    console.log('[PetSettings] loadPets() 开始加载宠物列表');
     const api = eApi();
-    console.log('[PetSettings] electronAPI 可用:', !!api, ', petListInstalled:', !!api?.petListInstalled);
     // Electron IPC 模式
     if (api?.petListInstalled) {
       try {
-        console.log('[PetSettings] 走 IPC 模式加载宠物');
         const list = await api.petListInstalled();
-        console.log('[PetSettings] IPC 返回:', list.length, '个宠物', JSON.stringify(list.map((p: any) => ({id:p.id, name:p.name}))));
         setPets(list);
         return;
       } catch (err: any) {
-        console.error('[PetSettings] IPC 加载失败:', err.message, err.stack);
+        console.error('[PetSettings] IPC 加载失败:', err);
       }
     }
     // 浏览器 dev 模式：走 REST API
-    console.log('[PetSettings] 走 REST API 模式加载宠物');
     try {
       const res = await fetch('/api/pets');
-      console.log('[PetSettings] REST API 响应状态:', res.status);
       if (res.ok) {
         const list = await res.json();
-        console.log('[PetSettings] REST API 返回:', list.length, '个宠物');
         setPets(list);
       } else {
         setElectronOk(false);
         setElectronDebug('REST API 返回错误');
       }
     } catch (err: any) {
-      console.error('[PetSettings] REST API 加载失败:', err.message);
       setElectronOk(false);
       setElectronDebug(`无法加载 (IPC 与 REST 均不可用): ${err.message}`);
     }
   }
 
   async function activatePet(pet: InstalledPet) {
-    console.log('[PetSettings] activatePet: id="' + pet.id + '", name="' + pet.name + '", currentActive=' + activePetId);
-    // 切换选中状态（浏览器模式下仅本地 UI 状态）
     if (activePetId === pet.id) {
-      console.log('[PetSettings] 取消激活宠物');
       setActivePetId(null);
       eApi()?.petDeactivate();
     } else {
-      console.log('[PetSettings] 激活宠物: ' + pet.id + ', zoom=' + zoom);
       setActivePetId(pet.id);
-      // 只传 id 和 zoom，路径和 manifest 由主进程解析
       eApi()?.petActivate({ id: pet.id, zoom });
     }
   }
@@ -322,24 +298,6 @@ export default function PetSettings() {
                 导入
               </button>
             </div>
-          </div>
-
-          {/* 调试日志面板 */}
-          <div style={{ marginTop: 24 }}>
-            <div style={sectionLabelStyle}>
-              运行日志
-              <span style={{ fontWeight: 400, fontSize: 10, marginLeft: 8 }}>(来自主进程，每 3s 刷新)</span>
-            </div>
-            <pre style={{
-              background: 'rgba(0,0,0,0.85)', color: '#0f0',
-              padding: '10px 14px', borderRadius: 'var(--radius-md)',
-              fontSize: 10, fontFamily: 'var(--font-mono), monospace',
-              maxHeight: 200, overflowY: 'auto',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-              lineHeight: 1.6,
-            }}>
-              {logLines || '(等待日志...)'}
-            </pre>
           </div>
 
           <div style={{ marginTop: 20, padding: '14px 18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-soft)', background: 'var(--chat-bg)' }}>
