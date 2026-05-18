@@ -486,6 +486,10 @@ app.whenReady().then(() => {
     return logger.tail(lines);
   });
 
+  ipcMain.handle('pet:get-config', async () => {
+    return loadPetConfig();
+  });
+
   // 渲染进程读取文件（返回 Buffer，无大小限制）
   ipcMain.handle('pet:read-file', async (_event, filePath) => {
     try {

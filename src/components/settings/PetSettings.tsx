@@ -28,7 +28,26 @@ export default function PetSettings() {
   const [electronOk, setElectronOk] = useState(true);
   const [electronDebug, setElectronDebug] = useState('');
 
-  useEffect(() => { loadPets(); }, []);
+  useEffect(() => {
+    loadPets();
+    loadConfig();
+  }, []);
+
+  async function loadConfig() {
+    const api = eApi();
+    if (!api?.petGetConfig) return;
+    try {
+      const config = await api.petGetConfig();
+      if (config) {
+        setActivePetId(config.defaultPetId || null);
+        setZoom(config.zoom || 1.0);
+        setPosition(config.position || 'bottom-right');
+        setAutoWake(config.autoWakeOnStartup !== false);
+      }
+    } catch (err: any) {
+      console.error('[PetSettings] 加载配置失败:', err);
+    }
+  }
 
   async function loadPets() {
     const api = eApi();

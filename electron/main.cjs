@@ -337,6 +337,10 @@ app.whenReady().then(function () {
     return logger.tail(lines || 50);
   });
 
+  ipcMain.handle('pet:get-config', async function () {
+    return loadPetConfig();
+  });
+
   // 渲染进程读取文件（返回 Buffer，无大小限制）
   ipcMain.handle('pet:read-file', async function (_event, filePath) {
     try {

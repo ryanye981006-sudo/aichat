@@ -277,6 +277,7 @@
   let dragStartPetX = 0, dragStartPetY = 0;
   let dragCumDX = 0, dragCumDY = 0;
   let hoverTimer = null;
+  let exitDebounceTimer = null;
 
   function petRect() {
     return {
@@ -286,23 +287,32 @@
     };
   }
 
-  function isNearPet(clientX, clientY) {
+  function isNearPet(clientX, clientY, exiting) {
     var r = petRect();
-    var margin = 8; // 边缘容差
+    // hysteresis：离开时用更宽的容差，防止边缘快速切换导致闪烁
+    var margin = exiting ? 24 : 8;
     return clientX >= r.left - margin && clientX <= r.right + margin &&
            clientY >= r.top - margin && clientY <= r.bottom + margin;
   }
 
   // window mousemove 在 forward:true 时仍能触发，用于检测接近
   window.addEventListener('mousemove', function (e) {
-    var near = isNearPet(e.clientX, e.clientY);
+    var near = isNearPet(e.clientX, e.clientY, isMouseNear);
+
     if (near && !isMouseNear) {
       isMouseNear = true;
+      clearExitDebounce();
       api.sendDragStart(); // → setIgnoreMouseEvents(false)，现在可以接收 mousedown
     } else if (!near && isMouseNear && !isDragging) {
-      isMouseNear = false;
-      clearHoverTimer();
-      api.sendDragEnd();   // → setIgnoreMouseEvents(true)，恢复穿透
+      // 延迟退出：鼠标短暂离开后立即回来不会反复切换穿透状态
+      if (!exitDebounceTimer) {
+        exitDebounceTimer = setTimeout(function () {
+          isMouseNear = false;
+          clearHoverTimer();
+          api.sendDragEnd();   // → setIgnoreMouseEvents(true)，恢复穿透
+          exitDebounceTimer = null;
+        }, 150);
+      }
     }
 
     if (isDragging) {
@@ -339,6 +349,7 @@
   canvas.addEventListener('mousedown', function (e) {
     if (e.button !== 0) return;
     isDragging = true;
+    clearExitDebounce();
     dragCumDX = 0; dragCumDY = 0;
     dragStartScreenX = e.screenX;
     dragStartScreenY = e.screenY;
@@ -363,6 +374,10 @@
 
   function clearHoverTimer() {
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+  }
+
+  function clearExitDebounce() {
+    if (exitDebounceTimer) { clearTimeout(exitDebounceTimer); exitDebounceTimer = null; }
   }
 
   canvas.addEventListener('dblclick', function () {
