@@ -338,7 +338,6 @@
   let clickStartTime = 0;
   let isDragging = false;
   let dragStartX = 0, dragStartY = 0;
-  let winStartX = 0, winStartY = 0;
 
   // 像素碰撞检测：检测鼠标位置是否为非透明像素
   function isOpaquePixel(x, y) {
@@ -360,20 +359,24 @@
     if (isDragging) {
       const dx = e.screenX - dragStartX;
       const dy = e.screenY - dragStartY;
-      // 通过 IPC 告知主进程移动窗口位置
+      // 发送增量位移给主进程移动窗口
       api.sendPetAction({
         type: 'drag-move',
-        x: winStartX + dx,
-        y: winStartY + dy,
+        dx: dx,
+        dy: dy,
       });
+      dragStartX = e.screenX;
+      dragStartY = e.screenY;
     }
 
     // 像素透明度检测：透明区域穿透
-    const opaque = isOpaquePixel(e.offsetX, e.offsetY);
-    if (!opaque && !isDragging) {
-      canvas.style.pointerEvents = 'none';
-    } else {
-      canvas.style.pointerEvents = 'auto';
+    if (!isDragging) {
+      const opaque = isOpaquePixel(e.offsetX, e.offsetY);
+      if (!opaque) {
+        canvas.style.pointerEvents = 'none';
+      } else {
+        canvas.style.pointerEvents = 'auto';
+      }
     }
   });
 
@@ -383,24 +386,25 @@
     const opaque = isOpaquePixel(e.offsetX, e.offsetY);
     if (!opaque) return;
 
+    isDragging = true;
     clickStartTime = Date.now();
     dragStartX = e.screenX;
     dragStartY = e.screenY;
-    winStartX = e.screenX;
-    winStartY = e.screenY;
 
+    petLog('DEBUG', '拖拽开始: screenX=' + e.screenX + ', screenY=' + e.screenY);
     api.sendDragStart();
   });
 
   canvas.addEventListener('mouseup', function (e) {
     const elapsed = Date.now() - clickStartTime;
 
-    if (elapsed < 200 && !isDragging) {
-      // 单击
+    if (elapsed < 200 && isDragging && Math.abs(e.screenX - dragStartX) < 5 && Math.abs(e.screenY - dragStartY) < 5) {
+      // 短按且未移动 → 单击
       handleClick();
     }
 
     if (isDragging) {
+      petLog('DEBUG', '拖拽结束');
       api.sendDragEnd();
     }
 
@@ -411,6 +415,7 @@
   // 鼠标离开时也结束拖拽
   canvas.addEventListener('mouseleave', function () {
     if (isDragging) {
+      petLog('DEBUG', '鼠标离开，强制结束拖拽');
       api.sendDragEnd();
       isDragging = false;
     }

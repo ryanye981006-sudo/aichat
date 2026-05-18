@@ -361,7 +361,7 @@ app.whenReady().then(() => {
           description: manifest.description || '',
           version: manifest.version || '1.0.0',
           installedAt: fs.statSync(manifestPath).mtime.toISOString(),
-          spritesheetUrl: `http://localhost:4000/api/pets/${entry.name}/spritesheet`,
+          spritesheetUrl: `http://localhost:3001/api/pets/${entry.name}/spritesheet`,
         };
         pets.push(pet);
         logger.info('Main', `发现宠物: id="${pet.id}", name="${pet.name}"`);
@@ -408,6 +408,32 @@ app.whenReady().then(() => {
         mainWindow.show();
         mainWindow.focus();
       }
+    }
+    if (action.type === 'drag-move') {
+      if (petWindow && !petWindow.isDestroyed()) {
+        const [x, y] = petWindow.getPosition();
+        petWindow.setPosition(x + (action.dx || 0), y + (action.dy || 0));
+      }
+    }
+  });
+
+  // 拖拽开始：允许窗口接收鼠标事件
+  ipcMain.on('pet:drag-start', () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      petWindow.setIgnoreMouseEvents(false);
+    }
+  });
+
+  // 拖拽结束：保存位置并恢复点击穿透
+  ipcMain.on('pet:drag-end', () => {
+    if (petWindow && !petWindow.isDestroyed()) {
+      const bounds = petWindow.getBounds();
+      const cfg = loadConfig();
+      cfg.position = 'custom';
+      cfg.customPosition = { x: bounds.x, y: bounds.y };
+      saveConfig(cfg);
+      petWindow.setIgnoreMouseEvents(true, { forward: true });
+      petWindow.webContents.send('pet:enable-transparent');
     }
   });
 

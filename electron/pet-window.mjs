@@ -129,11 +129,23 @@ export function createPetWindow(mainWindow) {
 
 export function updatePetWindow(petWindow, config) {
   if (!petWindow || petWindow.isDestroyed()) return;
-  petWindow.setSize(Math.round(192 * (config.zoom || 1.0)), Math.round(208 * (config.zoom || 1.0)));
+  const bounds = petWindow.getBounds();
+  const oldCenterX = bounds.x + bounds.width / 2;
+  const oldCenterY = bounds.y + bounds.height / 2;
+  const newW = Math.round(192 * (config.zoom || 1.0));
+  const newH = Math.round(208 * (config.zoom || 1.0));
   if (config.position !== 'custom') {
-    const display = screen.getDisplayMatching(petWindow.getBounds());
+    const display = screen.getDisplayMatching(bounds);
     const pos = calcPosition(petWindow, config, display.workArea);
-    petWindow.setPosition(pos.x, pos.y);
+    petWindow.setBounds({ x: pos.x, y: pos.y, width: newW, height: newH });
+  } else {
+    // 自定义位置：以中心点锚定缩放
+    petWindow.setBounds({
+      x: Math.round(oldCenterX - newW / 2),
+      y: Math.round(oldCenterY - newH / 2),
+      width: newW,
+      height: newH,
+    });
   }
   saveConfig(config);
   petWindow.webContents.send('pet:update-config', config);
