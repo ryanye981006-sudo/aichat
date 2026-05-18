@@ -257,9 +257,6 @@ function startServer() {
   });
 }
 
-// 禁用 GPU 加速，避免无 GPU 环境下崩溃（WM/Server 环境常见问题）
-app.disableHardwareAcceleration();
-
 app.whenReady().then(() => {
   ipcMain.on('window-minimize', () => {
     if (mainWindow) mainWindow.minimize();
