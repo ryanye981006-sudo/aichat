@@ -59,16 +59,16 @@
     rows: 9
   };
 
-  // Codex 社区标准默认动画行映射
+  // Codex 社区标准默认动画行映射（帧数按社区素材实际帧数）
   const DEFAULT_ANIMATIONS = {
-    idle:         { row: 0, frames: 8, fps: 4 },
-    waving:       { row: 1, frames: 8, fps: 6 },
-    review:       { row: 2, frames: 8, fps: 6 },
+    idle:         { row: 0, frames: 6, fps: 6 },
+    waving:       { row: 1, frames: 4, fps: 6 },
+    review:       { row: 2, frames: 6, fps: 6 },
     runningRight: { row: 3, frames: 8, fps: 8 },
-    jumping:      { row: 4, frames: 8, fps: 8 },
-    grab:         { row: 5, frames: 8, fps: 6 },
-    failed:       { row: 6, frames: 8, fps: 6 },
-    grabbing:     { row: 7, frames: 8, fps: 6 },
+    jumping:      { row: 4, frames: 5, fps: 7 },
+    grab:         { row: 5, frames: 8, fps: 7 },
+    failed:       { row: 6, frames: 8, fps: 7 },
+    grabbing:     { row: 7, frames: 6, fps: 6 },
     runningLeft:  { row: 8, frames: 8, fps: 8 }
   };
 
@@ -338,6 +338,8 @@
   let clickStartTime = 0;
   let isDragging = false;
   let dragStartX = 0, dragStartY = 0;
+  let dragCumDX = 0, dragCumDY = 0;    // 累计拖拽位移，用于判断方向
+  let hoverTimer = null;                 // 悬停计时器
 
   // 像素碰撞检测：检测鼠标位置是否为非透明像素
   function isOpaquePixel(x, y) {
@@ -352,6 +354,21 @@
     return pixel.data[3] > 30;
   }
 
+  // 根据拖拽方向切换动画（借鉴 Open Design: drag-right→runningRight, drag-left→runningLeft 等）
+  function applyDragAnimation() {
+    const absDX = Math.abs(dragCumDX);
+    const absDY = Math.abs(dragCumDY);
+    // 只有位移足够才触发方向动画
+    if (absDX < 10 && absDY < 10) return;
+    if (absDX > absDY) {
+      // 水平方向为主
+      playAnimation(dragCumDX > 0 ? 'runningRight' : 'runningLeft', {});
+    } else {
+      // 垂直方向为主
+      playAnimation(dragCumDY > 0 ? 'jumping' : 'waving', {});
+    }
+  }
+
   canvas.addEventListener('mousemove', function (e) {
     mouseX = e.offsetX;
     mouseY = e.offsetY;
@@ -359,6 +376,10 @@
     if (isDragging) {
       const dx = e.screenX - dragStartX;
       const dy = e.screenY - dragStartY;
+      dragCumDX += dx;
+      dragCumDY += dy;
+      // 按方向切换动画
+      applyDragAnimation();
       // 发送增量位移给主进程移动窗口
       api.sendPetAction({
         type: 'drag-move',
@@ -367,18 +388,30 @@
       });
       dragStartX = e.screenX;
       dragStartY = e.screenY;
-    }
-
-    // 像素透明度检测：透明区域穿透
-    if (!isDragging) {
+    } else {
+      // 非拖拽：检测悬停
       const opaque = isOpaquePixel(e.offsetX, e.offsetY);
-      if (!opaque) {
-        canvas.style.pointerEvents = 'none';
-      } else {
+      if (opaque && currentState === 'idle') {
+        // 透明区域让鼠标穿透
         canvas.style.pointerEvents = 'auto';
+        // 启动悬停计时
+        if (!hoverTimer) {
+          hoverTimer = setTimeout(() => {
+            if (!isDragging && currentState === 'idle') {
+              playAnimation('waving', {});
+            }
+          }, 600);
+        }
+      } else if (!opaque) {
+        canvas.style.pointerEvents = 'none';
+        clearHoverTimer();
       }
     }
   });
+
+  function clearHoverTimer() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+  }
 
   canvas.addEventListener('mousedown', function (e) {
     if (e.button !== 0) return; // 仅左键
@@ -387,9 +420,12 @@
     if (!opaque) return;
 
     isDragging = true;
+    dragCumDX = 0;
+    dragCumDY = 0;
     clickStartTime = Date.now();
     dragStartX = e.screenX;
     dragStartY = e.screenY;
+    clearHoverTimer();
 
     petLog('DEBUG', '拖拽开始: screenX=' + e.screenX + ', screenY=' + e.screenY);
     api.sendDragStart();
@@ -398,26 +434,38 @@
   canvas.addEventListener('mouseup', function (e) {
     const elapsed = Date.now() - clickStartTime;
 
-    if (elapsed < 200 && isDragging && Math.abs(e.screenX - dragStartX) < 5 && Math.abs(e.screenY - dragStartY) < 5) {
-      // 短按且未移动 → 单击
+    if (elapsed < 200 && isDragging && Math.abs(dragCumDX) < 5 && Math.abs(dragCumDY) < 5) {
+      // 短按且未明显移动 → 单击
       handleClick();
     }
 
     if (isDragging) {
-      petLog('DEBUG', '拖拽结束');
+      petLog('DEBUG', '拖拽结束, 累计位移: dx=' + dragCumDX + ', dy=' + dragCumDY);
       api.sendDragEnd();
+      // 拖拽结束后恢复 idle
+      setTimeout(() => { if (!isDragging) setState('idle'); }, 200);
     }
 
     isDragging = false;
+    dragCumDX = 0;
+    dragCumDY = 0;
     clickStartTime = 0;
   });
 
-  // 鼠标离开时也结束拖拽
+  // 鼠标离开时结束拖拽 + 恢复 idle
   canvas.addEventListener('mouseleave', function () {
+    clearHoverTimer();
     if (isDragging) {
       petLog('DEBUG', '鼠标离开，强制结束拖拽');
       api.sendDragEnd();
       isDragging = false;
+      dragCumDX = 0;
+      dragCumDY = 0;
+      setTimeout(() => setState('idle'), 200);
+    }
+    // 鼠标离开后恢复 idle（如果之前是 waving）
+    if (currentState !== 'idle' && !isDragging) {
+      setState('idle');
     }
   });
 
