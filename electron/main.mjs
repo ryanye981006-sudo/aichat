@@ -96,6 +96,12 @@ function createTray() {
 
 // ---- 宠物全屏覆盖层（替代独立小窗口） ----
 let petOverlay = null;
+let currentExpectedPetId = null;  // did-finish-load 竞态保护：当前期望的宠物 ID
+
+// spritesheet 文件读取缓存（减少 IPC + 磁盘 I/O）
+const fileReadCache = new Map();
+const FILE_CACHE_MAX = 20 * 1024 * 1024;  // 20MB 上限
+let fileCacheTotal = 0;
 const PET_CONFIG_PATH = path.join((process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~'), '.aichat', 'pet-config.json');
 
 function getPetConfigPath() { return PET_CONFIG_PATH; }
@@ -336,6 +342,9 @@ app.whenReady().then(() => {
     fullData.zoom = petData.zoom || 1.0;
     fullData.config = config;
 
+    const expectedId = petData.id;
+    currentExpectedPetId = expectedId;
+
     // 复用已有 overlay，避免重建窗口的延迟
     if (petOverlay && !petOverlay.isDestroyed()) {
       logger.info('Main', '复用已有 overlay，直接发送 pet:load');
@@ -345,6 +354,10 @@ app.whenReady().then(() => {
 
     const overlay = createPetOverlay();
     overlay.webContents.on('did-finish-load', () => {
+      if (currentExpectedPetId !== expectedId) {
+        logger.info('Main', `did-finish-load: 宠物已切换 (期望=${currentExpectedPetId}), 忽略旧回调 (${expectedId})`);
+        return;
+      }
       logger.info('Main', 'pet.html 加载完成, 发送 pet:load 数据');
       overlay.webContents.send('pet:load', fullData);
     });
@@ -495,11 +508,32 @@ app.whenReady().then(() => {
     return loadPetConfig();
   });
 
-  // 渲染进程读取文件（返回 Buffer，无大小限制）
+  // 渲染进程读取文件（返回 Buffer，带内存缓存）
   ipcMain.handle('pet:read-file', async (_event, filePath) => {
     try {
+      // 缓存命中：直接返回，省磁盘 I/O
+      const cached = fileReadCache.get(filePath);
+      if (cached) {
+        logger.debug('Main', `pet:read-file 缓存命中: ${filePath}`);
+        return { ok: true, data: cached.data };
+      }
+
       if (!fs.existsSync(filePath)) return { ok: false, error: '文件不存在' };
       const buf = fs.readFileSync(filePath);
+
+      // LRU 淘汰
+      const size = buf.length;
+      while (fileCacheTotal + size > FILE_CACHE_MAX && fileReadCache.size > 0) {
+        const firstKey = fileReadCache.keys().next().value;
+        const old = fileReadCache.get(firstKey);
+        fileCacheTotal -= old.size;
+        fileReadCache.delete(firstKey);
+      }
+      if (size <= FILE_CACHE_MAX) {
+        fileReadCache.set(filePath, { data: buf, size });
+        fileCacheTotal += size;
+      }
+
       return { ok: true, data: buf };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -558,12 +592,18 @@ app.whenReady().then(() => {
   if (config.autoWakeOnStartup && config.defaultPetId) {
     setTimeout(() => {
       try {
-        logger.info('Main', `自动唤醒宠物: "${config.defaultPetId}"`);
-        const fullData = loadPetData(config.defaultPetId);
+        const expectedId = config.defaultPetId;
+        currentExpectedPetId = expectedId;
+        logger.info('Main', `自动唤醒宠物: "${expectedId}"`);
+        const fullData = loadPetData(expectedId);
         fullData.zoom = config.zoom || 1.0;
         fullData.config = config;
         const overlay = createPetOverlay();
         overlay.webContents.on('did-finish-load', () => {
+          if (currentExpectedPetId !== expectedId) {
+            logger.info('Main', '自动唤醒 did-finish-load: 宠物已切换，忽略');
+            return;
+          }
           logger.info('Main', '自动唤醒: pet.html 加载完成, 发送 pet:load');
           overlay.webContents.send('pet:load', fullData);
         });

@@ -58,6 +58,12 @@
   let idlePhase = 'active';
   let idleTimeStart = 0;
   let isPaused = false;
+  let sleepTimerId = 0;  // sleep 阶段 setTimeout 替代 rAF
+
+  // spritesheet 缓存与内存管理
+  var spritesheetCache = new Map();  // key: petId, value: { img, blobUrl }
+  var MAX_CACHE_SIZE = 3;
+  var currentBlobUrl = null;  // 当前活跃 Blob URL，用于 revoke
 
   // === 定位相关 ===
   function applyPosition() {
@@ -177,6 +183,10 @@
   // === 状态机 ===
   function transitionState(newState) {
     if (newState === currentState) return;
+    // 从 sleep 恢复时切回 rAF 模式
+    if (currentState === 'sleep' && newState !== 'sleep') {
+      stopSleepRender();
+    }
     var animMap = {
       idle: 'idle', attention: 'waving', thinking: 'review',
       working: 'runningRight', success: 'jumping', error: 'failed', sleep: 'idle',
@@ -191,7 +201,6 @@
   }
 
   function setState(newState) {
-    currentState = newState;
     if (newState === 'idle') {
       idleTimeStart = performance.now();
       idlePhase = 'active';
@@ -203,11 +212,46 @@
     if (currentState !== 'idle' && currentState !== 'sleep') return;
     var elapsed = performance.now() - idleTimeStart;
     if (elapsed >= 300000) {
-      if (idlePhase !== 'sleep') { idlePhase = 'sleep'; if (currentState === 'idle') { currentState = 'sleep'; fps = 2; } }
+      if (idlePhase !== 'sleep') {
+        idlePhase = 'sleep';
+        if (currentState === 'idle') {
+          currentState = 'sleep';
+          fps = 2;
+          // sleep 时切换到 setTimeout 模式，释放 rAF
+          if (isRunning) {
+            isRunning = false;
+            cancelAnimationFrame(animFrameId);
+            startSleepRender();
+          }
+        }
+      }
     } else if (elapsed >= 120000) { idlePhase = 'drowsy'; }
     else if (elapsed >= 30000) { idlePhase = 'fidget'; }
   }
   setInterval(updateIdlePhase, 1000);
+
+  // sleep 阶段的低功耗 setTimeout 渲染（替代 rAF）
+  function startSleepRender() {
+    stopSleepRender();
+    function sleepTick() {
+      if (currentState !== 'sleep' || isRunning || isPaused) { sleepTimerId = 0; return; }
+      currentFrame++;
+      if (currentAnimation && currentFrame >= currentAnimation.frames) currentFrame = 0;
+      drawFrame();
+      sleepTimerId = setTimeout(sleepTick, 500);  // 2fps
+    }
+    sleepTimerId = setTimeout(sleepTick, 500);
+  }
+  function stopSleepRender() {
+    if (sleepTimerId) { clearTimeout(sleepTimerId); sleepTimerId = 0; }
+  }
+
+  // 释放旧 spritesheet 资源（ImageBitmap.close / Blob URL）
+  function releaseSpritesheet() {
+    if (spritesheet && spritesheet.close) spritesheet.close();
+    spritesheet = null;
+    if (currentBlobUrl) { URL.revokeObjectURL(currentBlobUrl); currentBlobUrl = null; }
+  }
 
   // === 加载宠物 ===
   var loadId = 0;   // 递增，防止切换宠物后旧异步回调覆盖新数据
@@ -216,11 +260,16 @@
     var myLoadId = ++loadId;
     petLog('INFO', 'loadPet #' + myLoadId + ': id="' + petData.id + '", name="' + petData.name + '"');
 
-    // 立即停止当前动画，清空画布显示加载中
+    // 停止当前动画
     isRunning = false;
     cancelAnimationFrame(animFrameId);
+    stopSleepRender();
     currentAnimation = null;
-    spritesheet = null;
+
+    // 释放旧 spritesheet 资源
+    releaseSpritesheet();
+
+    // 清空画布显示加载中
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = 'rgba(136, 153, 184, 0.4)';
     ctx.font = '20px sans-serif';
@@ -246,7 +295,16 @@
     setInitialPosition(petData.config);
     resizeCanvas();
 
-    // 通过 IPC invoke 读取 spritesheet 文件（Buffer → Blob URL，无大小限制）
+    // === spritesheet 缓存 ===
+    var cached = spritesheetCache.get(petData.id);
+    if (cached && cached.img) {
+      petLog('INFO', '缓存命中: ' + petData.id + ' → 免 IPC + 免解码');
+      spritesheet = cached.img;
+      setState('idle');
+      return;
+    }
+
+    // 通过 IPC invoke 读取 spritesheet 文件（Buffer → Blob URL → 解码）
     var ssPath = petData.path + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp');
     petLog('INFO', '加载 spritesheet: ' + ssPath);
 
@@ -255,35 +313,76 @@
       if (!result || !result.ok) {
         petLog('ERROR', '读取失败: ' + (result ? result.error : 'unknown'));
         var fallback = petData.spritesheetUrl;
-        if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback, myLoadId); }
+        if (fallback) loadWithFallback(fallback, myLoadId);
         return;
       }
       var buf = new Uint8Array(result.data);
       var mime = ssPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/webp';
       var blob = new Blob([buf], { type: mime });
       var blobUrl = URL.createObjectURL(blob);
+      currentBlobUrl = blobUrl;
       petLog('INFO', 'Blob URL 已创建: ' + blobUrl.substring(0, 40) + '...');
-      loadImage(blobUrl, myLoadId);
+      decodeSpritesheet(blobUrl, myLoadId);
     }).catch(function (err) {
       if (myLoadId !== loadId) return;
       petLog('ERROR', 'IPC 读取异常: ' + err.message);
       var fallback = petData.spritesheetUrl;
-      if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback, myLoadId); }
+      if (fallback) loadWithFallback(fallback, myLoadId);
     });
 
-    function loadImage(url, expectedLoadId) {
+    // === createImageBitmap GPU 解码（优先），失败回退 Image ===
+    function decodeSpritesheet(url, expectedLoadId) {
+      if (typeof createImageBitmap === 'function') {
+        fetch(url).then(function (resp) { return resp.blob(); })
+          .then(function (blob) {
+            return createImageBitmap(blob, { imageOrientation: 'none', premultiplyAlpha: 'premultiply' });
+          })
+          .then(function (bitmap) {
+            if (expectedLoadId !== loadId) { bitmap.close(); return; }
+            petLog('INFO', 'createImageBitmap GPU 解码成功: ' + bitmap.width + 'x' + bitmap.height);
+            onDecodeDone(bitmap, url, expectedLoadId);
+          })
+          .catch(function () {
+            if (expectedLoadId !== loadId) return;
+            petLog('WARN', 'createImageBitmap 失败，回退 Image');
+            loadWithFallback(url, expectedLoadId);
+          });
+        return;
+      }
+      loadWithFallback(url, expectedLoadId);
+    }
+
+    function loadWithFallback(url, expectedLoadId) {
       var img = new Image();
       img.onload = function () {
-        if (expectedLoadId !== loadId) { petLog('INFO', '忽略过期图片 #' + expectedLoadId); return; }
-        petLog('INFO', 'spritesheet 加载成功! ' + img.width + 'x' + img.height);
-        spritesheet = img;
-        setState('idle');
+        if (expectedLoadId !== loadId) return;
+        petLog('INFO', 'Image 解码成功: ' + img.width + 'x' + img.height);
+        onDecodeDone(img, url, expectedLoadId);
       };
       img.onerror = function () {
         if (expectedLoadId !== loadId) return;
-        petLog('ERROR', 'spritesheet 加载失败: ' + url.substring(0, 60));
+        petLog('ERROR', 'spritesheet 加载失败');
       };
       img.src = url;
+    }
+
+    function onDecodeDone(img, url, expectedLoadId) {
+      if (expectedLoadId !== loadId) return;
+      spritesheet = img;
+
+      // 存入 LRU 缓存，淘汰最旧条目
+      if (spritesheetCache.size >= MAX_CACHE_SIZE) {
+        var firstKey = spritesheetCache.keys().next().value;
+        var old = spritesheetCache.get(firstKey);
+        if (old) {
+          if (old.img && old.img.close) old.img.close();
+          if (old.blobUrl) URL.revokeObjectURL(old.blobUrl);
+        }
+        spritesheetCache.delete(firstKey);
+      }
+      spritesheetCache.set(petData.id, { img: img, blobUrl: url });
+
+      setState('idle');
     }
   }
 

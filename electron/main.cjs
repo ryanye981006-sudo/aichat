@@ -10,6 +10,12 @@ const isDev = !app.isPackaged;
 
 let mainWindow = null;
 let petOverlay = null;
+let currentExpectedPetId = null;  // did-finish-load 竞态保护
+
+// spritesheet 文件读取缓存
+const fileReadCache = new Map();
+const FILE_CACHE_MAX = 20 * 1024 * 1024;
+let fileCacheTotal = 0;
 
 // ---- 宠物配置 ----
 const PET_CONFIG_PATH = path.join((process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~'), '.aichat', 'pet-config.json');
@@ -220,6 +226,9 @@ app.whenReady().then(function () {
     fullData.zoom = petData.zoom || 1.0;
     fullData.config = config;
 
+    var expectedId = petData.id;
+    currentExpectedPetId = expectedId;
+
     // 复用已有 overlay，避免重建窗口的延迟
     if (petOverlay && !petOverlay.isDestroyed()) {
       logger.info('Main', '复用已有 overlay，直接发送 pet:load');
@@ -229,6 +238,10 @@ app.whenReady().then(function () {
 
     var overlay = createPetOverlay();
     overlay.webContents.on('did-finish-load', function () {
+      if (currentExpectedPetId !== expectedId) {
+        logger.info('Main', 'did-finish-load: 宠物已切换, 忽略旧回调');
+        return;
+      }
       logger.info('Main', 'pet.html 加载完成, 发送 pet:load');
       overlay.webContents.send('pet:load', fullData);
     });
@@ -349,11 +362,30 @@ app.whenReady().then(function () {
     return loadPetConfig();
   });
 
-  // 渲染进程读取文件（返回 Buffer，无大小限制）
+  // 渲染进程读取文件（返回 Buffer，带内存缓存）
   ipcMain.handle('pet:read-file', async function (_event, filePath) {
     try {
+      var cached = fileReadCache.get(filePath);
+      if (cached) {
+        logger.debug('Main', 'pet:read-file 缓存命中: ' + filePath);
+        return { ok: true, data: cached.data };
+      }
+
       if (!fs.existsSync(filePath)) return { ok: false, error: '文件不存在' };
       var buf = fs.readFileSync(filePath);
+
+      var size = buf.length;
+      while (fileCacheTotal + size > FILE_CACHE_MAX && fileReadCache.size > 0) {
+        var firstKey = fileReadCache.keys().next().value;
+        var old = fileReadCache.get(firstKey);
+        fileCacheTotal -= old.size;
+        fileReadCache.delete(firstKey);
+      }
+      if (size <= FILE_CACHE_MAX) {
+        fileReadCache.set(filePath, { data: buf, size: size });
+        fileCacheTotal += size;
+      }
+
       return { ok: true, data: buf };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -396,11 +428,17 @@ app.whenReady().then(function () {
   if (config.autoWakeOnStartup && config.defaultPetId) {
     setTimeout(function () {
       try {
-        var fullData = loadPetData(config.defaultPetId);
+        var expectedId = config.defaultPetId;
+        currentExpectedPetId = expectedId;
+        var fullData = loadPetData(expectedId);
         fullData.zoom = config.zoom || 1.0;
         fullData.config = config;
         var overlay = createPetOverlay();
         overlay.webContents.on('did-finish-load', function () {
+          if (currentExpectedPetId !== expectedId) {
+            logger.info('Main', '自动唤醒 did-finish-load: 宠物已切换，忽略');
+            return;
+          }
           overlay.webContents.send('pet:load', fullData);
         });
         startFullscreenDetection(mainWindow, overlay);
