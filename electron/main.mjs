@@ -384,22 +384,6 @@ app.whenReady().then(() => {
     savePetConfig(config);
   });
 
-  ipcMain.handle('pet:import-url', async (_event, url) => {
-    logger.info('Main', `pet:import-url: ${url}`);
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        logger.error('Main', `pet:import-url 下载失败: HTTP ${response.status}`);
-        return { success: false, error: `下载失败: HTTP ${response.status}` };
-      }
-      const data = await response.json();
-      logger.info('Main', `pet:import-url 成功, data keys: ${Object.keys(data).join(',')}`);
-      return { success: true, data };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  });
-
   ipcMain.handle('pet:list-installed', async () => {
     const home = process.env.USERPROFILE || process.env.HOME || '~';
     const petsDir = path.join(home, '.aichat', 'pets');

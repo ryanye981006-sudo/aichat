@@ -15,7 +15,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   petActivate: (petData) => ipcRenderer.send('pet:activate', petData),
   petDeactivate: () => ipcRenderer.send('pet:deactivate'),
   petUpdateConfig: (config) => ipcRenderer.send('pet:update-config', config),
-  petImportFromURL: (url) => ipcRenderer.invoke('pet:import-url', url),
   petListInstalled: () => ipcRenderer.invoke('pet:list-installed'),
   petImportLocal: (sourceDir) => ipcRenderer.invoke('pet:import-local', sourceDir),
   petTailLog: (lines) => ipcRenderer.invoke('pet:tail-log', lines || 50),

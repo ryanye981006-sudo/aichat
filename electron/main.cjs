@@ -268,18 +268,6 @@ app.whenReady().then(function () {
     savePetConfig(config);
   });
 
-  ipcMain.handle('pet:import-url', async function (_event, url) {
-    logger.info('Main', 'pet:import-url: ' + url);
-    try {
-      var response = await fetch(url);
-      if (!response.ok) return { success: false, error: '下载失败: HTTP ' + response.status };
-      var data = await response.json();
-      return { success: true, data: data };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  });
-
   ipcMain.handle('pet:list-installed', async function () {
     var home = process.env.USERPROFILE || process.env.HOME || '~';
     var petsDir = path.join(home, '.aichat', 'pets');

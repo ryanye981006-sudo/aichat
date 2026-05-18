@@ -1,6 +1,5 @@
 // 桌宠设置页 — 已安装列表 + 导入 + 偏好设置
 import { useState, useEffect, useRef } from 'react';
-import { Globe, Trash2 } from 'lucide-react';
 
 const eApi = () => (window as any).electronAPI;
 
@@ -20,7 +19,6 @@ export default function PetSettings() {
   const [zoom, setZoom] = useState(1.0);
   const [position, setPosition] = useState<'bottom-right' | 'bottom-left' | 'custom'>('bottom-right');
   const [autoWake, setAutoWake] = useState(true);
-  const [urlInput, setUrlInput] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -119,20 +117,6 @@ export default function PetSettings() {
       if (api) await api.petImportLocal((files[0] as any).path || files[0].name);
       await loadPets();
     } catch (err) { console.error('导入失败:', err); }
-    finally { setLoading(false); }
-  }
-
-  async function handleURLImport() {
-    if (!urlInput.trim()) return;
-    setLoading(true);
-    try {
-      const api = eApi();
-      if (api) {
-        const result = await api.petImportFromURL(urlInput.trim());
-        if (result.success) { setUrlInput(''); await loadPets(); }
-        else { alert('导入失败: ' + result.error); }
-      }
-    } catch (err) { console.error('URL 导入失败:', err); }
     finally { setLoading(false); }
   }
 
@@ -297,38 +281,6 @@ export default function PetSettings() {
             <div style={{ fontSize: 12, color: 'var(--muted-soft)' }}>或点击此区域选择文件</div>
             <div style={{ fontSize: 11, color: 'var(--muted-soft)', marginTop: 6, fontFamily: 'var(--font-mono)' }}>
               支持 pet.json + spritesheet.webp 格式
-            </div>
-          </div>
-
-          <div style={{ marginTop: 20 }}>
-            <div style={sectionLabelStyle}>从 URL 导入</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input type="text" placeholder="https://petdex.crafter.run/pets/..."
-                value={urlInput} onChange={(e) => setUrlInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleURLImport()}
-                style={{ flex: 1, padding: '10px 14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', fontSize: 13, fontFamily: 'var(--font-body)', color: 'var(--fg)', outline: 'none', background: 'var(--chat-bg)' }}
-              />
-              <button onClick={handleURLImport} disabled={!urlInput.trim() || loading}
-                style={{ padding: '10px 18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: (!urlInput.trim() || loading) ? 'var(--chat-bg)' : 'var(--accent)', color: (!urlInput.trim() || loading) ? 'var(--muted-soft)' : '#fff', fontSize: 13, fontWeight: 500, cursor: (!urlInput.trim() || loading) ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', display: 'flex', alignItems: 'center', gap: 6, opacity: (!urlInput.trim() || loading) ? 0.5 : 1 }}
-              >
-                <Globe className="w-4 h-4" />
-                导入
-              </button>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 20, padding: '14px 18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-soft)', background: 'var(--chat-bg)' }}>
-            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted-soft)', marginBottom: 8 }}>
-              从开源社区获取桌宠
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--muted-soft)', lineHeight: 1.9 }}>
-              你可以在以下开源社区找到更多桌宠素材：
-              <br />
-              ▸ <a href="https://petdex.crafter.run" target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontWeight: 500 }}>Petdex 画廊</a> — 最活跃的 Codex Pet 社区，750+ 免费桌宠可供下载
-              <br />
-              ▸ <a href="https://codex-pets.net" target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontWeight: 500 }}>Codex Pets 分享站</a> — 官方分享平台
-              <br />
-              ▸ <a href="https://github.com/topics/codex-pet" target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontWeight: 500 }}>GitHub Codex Pet 主题</a> — 开源桌宠合集
             </div>
           </div>
         </div>
