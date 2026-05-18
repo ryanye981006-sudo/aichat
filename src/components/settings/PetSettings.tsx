@@ -198,7 +198,7 @@ export default function PetSettings() {
                     {pet.spritesheetUrl ? (
                       <img src={pet.spritesheetUrl}
                         alt={pet.name}
-                        style={{ width: 576, height: 702, display: 'block' }}
+                        style={{ width: 576, height: 702, display: 'block', maxWidth: 'none', objectFit: 'none', objectPosition: '0 0' }}
                         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                       />
                     ) : (
