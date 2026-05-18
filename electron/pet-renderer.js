@@ -27,13 +27,13 @@
     debugOverlay = document.createElement('div');
     debugOverlay.id = 'pet-debug-overlay';
     Object.assign(debugOverlay.style, {
-      position: 'fixed', bottom: '0', left: '0', right: '0',
-      maxHeight: '120px', overflowY: 'auto',
-      background: 'rgba(0,0,0,0.75)', color: '#0f0',
-      fontFamily: 'monospace', fontSize: '9px', lineHeight: '1.4',
-      padding: '4px 6px', zIndex: '9999',
+      position: 'fixed', bottom: '0', left: '0',
+      maxWidth: '100%', maxHeight: '48px', overflowY: 'auto',
+      background: 'rgba(0,0,0,0.55)', color: '#0f0',
+      fontFamily: 'monospace', fontSize: '7px', lineHeight: '1.3',
+      padding: '2px 4px', zIndex: '9999',
       pointerEvents: 'none', whiteSpace: 'pre-wrap',
-      borderTop: '1px solid rgba(255,255,255,0.15)',
+      borderTop: '1px solid rgba(255,255,255,0.1)',
     });
     document.body.appendChild(debugOverlay);
     updateDebugOverlay();
@@ -306,27 +306,24 @@
 
     resizeCanvas();
 
-    // 加载 spritesheet
-    const img = new Image();
-    const ssPath = petPath + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp');
-    // Windows 路径转换
-    const ssUrl = 'file:///' + ssPath.replace(/\\/g, '/').replace(/^\//, '');
+    // 加载 spritesheet — 优先用主进程传来的 HTTP URL，回退到 file://
+    const ssUrl = petData.spritesheetUrl || ('file:///' + (petPath + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp')).replace(/\\/g, '/').replace(/^\//, ''));
     petLog('INFO', '加载 spritesheet: ' + ssUrl);
 
+    const img = new Image();
     img.onload = function () {
       petLog('INFO', 'spritesheet 加载成功! ' + img.width + 'x' + img.height);
       spritesheet = img;
-      // 开始播放 idle 动画
       setState('idle');
     };
     img.onerror = function () {
-      petLog('ERROR', 'spritesheet 加载失败! 路径: ' + ssUrl);
+      petLog('ERROR', 'spritesheet 加载失败! URL: ' + ssUrl);
       // 在 canvas 上显示错误信息
       ctx.fillStyle = 'rgba(255,80,80,0.9)';
       ctx.font = '11px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('spritesheet 加载失败', canvas.width / 2, canvas.height / 2 - 10);
-      ctx.fillText(ssPath.replace(/\\/g, '/').split('/').pop(), canvas.width / 2, canvas.height / 2 + 10);
+      ctx.fillText(ssUrl.split('/').pop(), canvas.width / 2, canvas.height / 2 + 10);
       ctx.textAlign = 'start';
     };
 
@@ -563,11 +560,14 @@
   });
 
   // ============ 启动 ============
-  // 初始显示等待状态（主进程会在加载后发送 pet:load）
-  ctx.fillStyle = 'rgba(136, 153, 184, 0.4)';
-  ctx.font = '20px sans-serif';
+  // 初始显示等待状态（主进程会在加载后发送 pet:load），置于画布上方避免被调试面板遮挡
+  ctx.fillStyle = 'rgba(136, 153, 184, 0.5)';
+  ctx.font = '24px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('🐾', canvas.width / 2, canvas.height / 2);
+  ctx.fillText('🐾', canvas.width / 2, 40);
+  ctx.font = '9px monospace';
+  ctx.fillStyle = 'rgba(136, 153, 184, 0.35)';
+  ctx.fillText('等待加载...', canvas.width / 2, 62);
   ctx.textAlign = 'start';
 
   console.log('[Pet] Renderer 就绪');

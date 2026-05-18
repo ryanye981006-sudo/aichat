@@ -278,7 +278,7 @@ app.whenReady().then(() => {
       logger.info('Main', `spritesheet 已确认存在: ${ssPath} (${fs.statSync(ssPath).size} bytes)`);
     }
 
-    return { id: petId, path: petPath, manifest: raw };
+    return { id: petId, path: petPath, manifest: raw, spritesheetUrl: `http://localhost:3001/api/pets/${petId}/spritesheet` };
   }
 
   ipcMain.on('pet:activate', (_event, petData) => {
