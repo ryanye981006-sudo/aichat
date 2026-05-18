@@ -76,7 +76,11 @@ if (existsSync(emojiDataDir)) {
   log('emoji-picker-element-data 未安装（不在后端依赖中）');
 }
 
-// 4. 构建（使用临时输出目录避免 Windows Defender 锁文件，完成后复制到 release/）
+// 4. 构建前端（确保 dist/ 与源码同步）
+log('构建前端...');
+execSync('npx vite build', { stdio: 'inherit' });
+
+// 5. Electron 打包（使用临时输出目录避免 Windows Defender 锁文件，完成后复制到 release/）
 log('运行 electron-builder...');
 
 // 从根 package.json 读取 electron 精确版本（Phase 1.5 已改为精确版）
