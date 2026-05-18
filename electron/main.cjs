@@ -2,15 +2,65 @@ const { app, BrowserWindow, globalShortcut, ipcMain, screen } = require('electro
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
-const { createPetWindow, updatePetWindow, sendPetEvent, loadConfig, saveConfig } = require('./pet-window.cjs');
+const os = require('os');
 const { startFullscreenDetection, stopFullscreenDetection } = require('./fullscreen-detector.cjs');
 const logger = require('./logger.cjs');
 
 const isDev = !app.isPackaged;
 
 let mainWindow = null;
-let petWindow = null;
+let petOverlay = null;
 
+// ---- 宠物配置 ----
+const PET_CONFIG_PATH = path.join((process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~'), '.aichat', 'pet-config.json');
+
+function loadPetConfig() {
+  try {
+    if (fs.existsSync(PET_CONFIG_PATH)) return JSON.parse(fs.readFileSync(PET_CONFIG_PATH, 'utf-8'));
+  } catch (e) { /* ignore */ }
+  return { defaultPetId: null, zoom: 1.0, position: 'bottom-right', customPosition: null, autoWakeOnStartup: true };
+}
+function savePetConfig(cfg) {
+  var dir = path.dirname(PET_CONFIG_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(PET_CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf-8');
+}
+
+// ---- 全屏宠物覆盖层 ----
+function createPetOverlay() {
+  if (petOverlay && !petOverlay.isDestroyed()) {
+    petOverlay.close();
+  }
+  var primaryDisplay = screen.getPrimaryDisplay();
+  var w = primaryDisplay.workAreaSize.width;
+  var h = primaryDisplay.workAreaSize.height;
+  var x = primaryDisplay.workArea.x;
+  var y = primaryDisplay.workArea.y;
+
+  petOverlay = new BrowserWindow({
+    x: x, y: y, width: w, height: h,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  petOverlay.loadFile(path.join(__dirname, 'pet.html'));
+  petOverlay.setIgnoreMouseEvents(true, { forward: true });
+
+  logger.info('Main', '全屏宠物覆盖层已创建: ' + w + 'x' + h + '+' + x + '+' + y);
+  return petOverlay;
+}
+
+// ---- 主窗口 ----
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -24,9 +74,7 @@ function createWindow() {
     },
   });
 
-  mainWindow.on('ready-to-show', () => {
-    registerShortcuts();
-  });
+  mainWindow.on('ready-to-show', function () { registerShortcuts(); });
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:3000');
@@ -35,100 +83,99 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
+  mainWindow.on('closed', function () { mainWindow = null; });
 
-  // 允许关闭到系统托盘（仅隐藏主窗口，宠物继续显示）
-  mainWindow.on('close', (event) => {
-    if (!app.isQuitting) {
-      event.preventDefault();
-      mainWindow.hide();
-    }
+  mainWindow.on('close', function (event) {
+    if (!app.isQuitting) { event.preventDefault(); mainWindow.hide(); }
   });
 }
 
 function registerShortcuts() {
-  globalShortcut.register('F11', () => {
-    if (mainWindow) {
-      mainWindow.setFullScreen(!mainWindow.isFullScreen());
-    }
+  globalShortcut.register('F11', function () {
+    if (mainWindow) mainWindow.setFullScreen(!mainWindow.isFullScreen());
   });
 }
 
-// 启动 Express 后端
+// ---- 后端服务 ----
 function startServer() {
-  let child;
+  var child;
 
   if (isDev) {
     child = spawn('npx', ['tsx', path.join(__dirname, '../server/src/index.ts')], {
-      env: { ...process.env },
-      stdio: 'pipe',
+      env: Object.assign({}, process.env), stdio: 'pipe',
     });
   } else {
-    const nodeExe = path.join(process.resourcesPath, 'node.exe');
-    const serverEntry = path.join(process.resourcesPath, 'server-dist', 'src', 'index.js');
+    var nodeExe = path.join(process.resourcesPath, 'node.exe');
+    var serverEntry = path.join(process.resourcesPath, 'server-dist', 'src', 'index.js');
 
     if (!fs.existsSync(nodeExe)) {
+      logger.error('Main', '找不到内嵌 Node.js: ' + nodeExe);
       console.error('[Server] 找不到内嵌 Node.js:', nodeExe);
       return;
     }
     if (!fs.existsSync(serverEntry)) {
+      logger.error('Main', '找不到服务端入口: ' + serverEntry);
       console.error('[Server] 找不到服务端入口:', serverEntry);
       return;
     }
 
     child = spawn(nodeExe, [serverEntry], {
-      env: { ...process.env },
-      stdio: 'pipe',
+      env: Object.assign({}, process.env), stdio: 'pipe',
     });
   }
 
-  child.stdout?.on('data', (data) => {
-    const lines = data.toString().trim().split('\n');
-    for (const line of lines) {
-      if (line.startsWith('PET_EVENT:')) {
+  logger.info('Main', '后端进程已启动, PID=' + child.pid);
+
+  child.stdout.on('data', function (data) {
+    var lines = data.toString().trim().split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.indexOf('PET_EVENT:') === 0) {
         try {
-          const event = JSON.parse(line.slice('PET_EVENT:'.length));
-          if (event.type && event.type.startsWith('session:')) {
-            sendPetEvent(petWindow, event);
+          var event = JSON.parse(line.slice('PET_EVENT:'.length));
+          if (event.type && event.type.indexOf('session:') === 0) {
+            if (petOverlay && !petOverlay.isDestroyed()) {
+              petOverlay.webContents.send('pet:event', event);
+            }
           }
-        } catch {
-          // 解析失败，忽略
-        }
+        } catch (e) { /* ignore */ }
       } else {
-        console.log(`[Server] ${line}`);
+        console.log('[Server] ' + line);
       }
     }
   });
 
-  child.stderr?.on('data', (data) => {
-    console.error(`[Server] ${data.toString().trim()}`);
+  child.stderr.on('data', function (data) {
+    console.error('[Server] ' + data.toString().trim());
   });
-  child.on('exit', (code) => {
-    logger.warn('Main', `后端进程退出, 退出码=${code}`);
-    console.log(`[Server] 进程退出，退出码: ${code}`);
+  child.on('exit', function (code) {
+    logger.warn('Main', '后端进程退出, 退出码=' + code);
+    console.log('[Server] 进程退出，退出码:', code);
   });
 }
 
-app.whenReady().then(() => {
-  // IPC: 前端触发全屏切换
-  ipcMain.on('toggle-fullscreen', () => {
+app.whenReady().then(function () {
+  // 窗口控制 IPC
+  ipcMain.on('window-minimize', function () { if (mainWindow) mainWindow.minimize(); });
+  ipcMain.on('window-maximize', function () {
+    if (mainWindow) { if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize(); }
+  });
+  ipcMain.on('window-close', function () { if (mainWindow) mainWindow.close(); });
+
+  ipcMain.on('toggle-fullscreen', function () {
     if (mainWindow) {
-      const newState = !mainWindow.isFullScreen();
+      var newState = !mainWindow.isFullScreen();
       mainWindow.setFullScreen(newState);
       mainWindow.webContents.send('fullscreen-changed', newState);
     }
   });
 
-  // ---- 宠物管理 IPC ----
-
-  // 加载宠物完整数据（解析路径 + manifest，社区缺失字段填充 Codex 默认值）
+  // 加载宠物完整数据
   function loadPetData(petId) {
-    const home = process.env.USERPROFILE || process.env.HOME || '~';
-    const petsDir = path.join(home, '.aichat', 'pets');
-    const petPath = path.join(petsDir, petId);
-    const manifestPath = path.join(petPath, 'pet.json');
+    var home = process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~';
+    var petsDir = path.join(home, '.aichat', 'pets');
+    var petPath = path.join(petsDir, petId);
+    var manifestPath = path.join(petPath, 'pet.json');
 
     logger.info('Main', 'loadPetData: petId="' + petId + '", petsDir="' + petsDir + '"');
 
@@ -136,33 +183,25 @@ app.whenReady().then(() => {
       logger.error('Main', '找不到 pet.json: ' + manifestPath);
       throw new Error('找不到宠物: ' + manifestPath);
     }
-    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    logger.info('Main', 'pet.json 已加载: displayName="' + raw.displayName + '", id="' + raw.id + '", name="' + raw.name + '"');
-    logger.debug('Main', 'pet.json sprite=' + JSON.stringify(raw.sprite) + ', spritesheetPath="' + (raw.spritesheetPath || '') + '"');
-    logger.debug('Main', 'pet.json animations keys=' + (raw.animations ? Object.keys(raw.animations).join(',') : '(无)'));
+    var raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    logger.info('Main', 'pet.json 已加载: displayName="' + raw.displayName + '", id="' + raw.id + '"');
 
     if (!raw.sprite) {
-      logger.info('Main', 'pet.json 缺少 sprite，填充 Codex 默认值');
       raw.sprite = { url: 'spritesheet.webp', width: 192, height: 208, columns: 8, rows: 9 };
       if (raw.spritesheetPath) raw.sprite.url = raw.spritesheetPath;
     }
     if (!raw.animations || Object.keys(raw.animations).length === 0) {
-      logger.info('Main', 'pet.json 缺少 animations，填充 Codex 默认值');
       raw.animations = {
-        idle:         { row: 0, frames: 6, fps: 6 },
-        waving:       { row: 1, frames: 4, fps: 6 },
-        review:       { row: 2, frames: 6, fps: 6 },
-        runningRight: { row: 3, frames: 8, fps: 8 },
-        jumping:      { row: 4, frames: 5, fps: 7 },
-        grab:         { row: 5, frames: 8, fps: 7 },
-        failed:       { row: 6, frames: 8, fps: 7 },
-        grabbing:     { row: 7, frames: 6, fps: 6 },
-        runningLeft:  { row: 8, frames: 8, fps: 8 },
+        idle: { row: 0, frames: 6, fps: 6 }, waving: { row: 1, frames: 4, fps: 6 },
+        review: { row: 2, frames: 6, fps: 6 }, runningRight: { row: 3, frames: 8, fps: 8 },
+        jumping: { row: 4, frames: 5, fps: 7 }, grab: { row: 5, frames: 8, fps: 7 },
+        failed: { row: 6, frames: 8, fps: 7 }, grabbing: { row: 7, frames: 6, fps: 6 },
+        runningLeft: { row: 8, frames: 8, fps: 8 },
       };
     }
 
-    // 验证 spritesheet 文件是否存在，读取为 Base64 data URL（避免渲染进程加载 file:/// 或 HTTP 的时序问题）
-    const ssPath = path.join(petPath, raw.sprite.url);
+    // Base64 data URL
+    var ssPath = path.join(petPath, raw.sprite.url);
     var spritesheetDataUrl = null;
     if (!fs.existsSync(ssPath)) {
       logger.error('Main', 'spritesheet 文件不存在: ' + ssPath);
@@ -177,121 +216,93 @@ app.whenReady().then(() => {
     return { id: petId, path: petPath, manifest: raw, spritesheetUrl: 'http://localhost:3001/api/pets/' + petId + '/spritesheet', spritesheetDataUrl: spritesheetDataUrl };
   }
 
-  ipcMain.on('pet:activate', (_event, petData) => {
-    logger.info('Main', 'pet:activate 收到请求: ' + JSON.stringify(petData));
-    if (petWindow && !petWindow.isDestroyed()) {
-      logger.info('Main', '关闭旧的宠物窗口');
-      petWindow.close();
-    }
-    petWindow = createPetWindow(mainWindow);
-    logger.info('Main', '宠物窗口已创建, id=' + petWindow.id);
-    const config = loadConfig();
+  // 宠物 IPC
+  ipcMain.on('pet:activate', function (_event, petData) {
+    logger.info('Main', 'pet:activate: ' + JSON.stringify(petData));
+    var overlay = createPetOverlay();
+    var config = loadPetConfig();
     config.defaultPetId = petData.id;
-    saveConfig(config);
-    const fullData = loadPetData(petData.id);
+    savePetConfig(config);
+    var fullData = loadPetData(petData.id);
     fullData.zoom = petData.zoom || 1.0;
-    petWindow.webContents.on('did-finish-load', () => {
-      logger.info('Main', 'pet.html 加载完成, 发送 pet:load 数据');
-      petWindow.webContents.send('pet:load', fullData);
+    fullData.config = config;
+    overlay.webContents.on('did-finish-load', function () {
+      logger.info('Main', 'pet.html 加载完成, 发送 pet:load');
+      overlay.webContents.send('pet:load', fullData);
     });
-    startFullscreenDetection(mainWindow, petWindow);
+    startFullscreenDetection(mainWindow, overlay);
   });
 
-  ipcMain.on('pet:deactivate', () => {
-    logger.info('Main', 'pet:deactivate 收到请求');
-    if (petWindow && !petWindow.isDestroyed()) {
-      logger.info('Main', '关闭宠物窗口');
+  ipcMain.on('pet:deactivate', function () {
+    logger.info('Main', 'pet:deactivate');
+    if (petOverlay && !petOverlay.isDestroyed()) {
       stopFullscreenDetection();
-      petWindow.close();
-      petWindow = null;
+      petOverlay.close();
+      petOverlay = null;
     }
-    const config = loadConfig();
+    var config = loadPetConfig();
     config.defaultPetId = null;
-    saveConfig(config);
+    savePetConfig(config);
   });
 
-  ipcMain.on('pet:update-config', (_event, config) => {
+  ipcMain.on('pet:update-config', function (_event, config) {
     logger.debug('Main', 'pet:update-config: ' + JSON.stringify(config));
-    updatePetWindow(petWindow, config);
+    if (petOverlay && !petOverlay.isDestroyed()) {
+      petOverlay.webContents.send('pet:update-config', config);
+    }
+    savePetConfig(config);
   });
 
-  ipcMain.handle('pet:import-url', async (_event, url) => {
+  ipcMain.handle('pet:import-url', async function (_event, url) {
     logger.info('Main', 'pet:import-url: ' + url);
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        logger.error('Main', 'pet:import-url 下载失败: HTTP ' + response.status);
-        return { success: false, error: '下载失败: HTTP ' + response.status };
-      }
-      const data = await response.json();
-      logger.info('Main', 'pet:import-url 成功, data keys: ' + Object.keys(data).join(','));
-      return { success: true, data };
+      var response = await fetch(url);
+      if (!response.ok) return { success: false, error: '下载失败: HTTP ' + response.status };
+      var data = await response.json();
+      return { success: true, data: data };
     } catch (err) {
-      logger.error('Main', 'pet:import-url 异常: ' + err.message);
       return { success: false, error: err.message };
     }
   });
 
-  ipcMain.handle('pet:list-installed', async () => {
-    const home = process.env.USERPROFILE || process.env.HOME || '~';
-    const petsDir = path.join(home, '.aichat', 'pets');
-    logger.info('Main', 'pet:list-installed: 扫描目录 "' + petsDir + '"');
-    console.log('[Pet] 扫描宠物目录:', petsDir);
-    if (!fs.existsSync(petsDir)) {
-      logger.warn('Main', '宠物目录不存在: "' + petsDir + '"');
-      console.log('[Pet] 目录不存在:', petsDir);
-      return [];
-    }
-    const entries = fs.readdirSync(petsDir, { withFileTypes: true });
-    logger.info('Main', '目录条目数: ' + entries.length);
-    console.log('[Pet] 目录条目:', entries.length);
-    const pets = [];
-    for (const entry of entries) {
+  ipcMain.handle('pet:list-installed', async function () {
+    var home = process.env.USERPROFILE || process.env.HOME || '~';
+    var petsDir = path.join(home, '.aichat', 'pets');
+    logger.info('Main', 'pet:list-installed: 扫描 "' + petsDir + '"');
+    if (!fs.existsSync(petsDir)) { logger.warn('Main', '宠物目录不存在'); return []; }
+    var entries = fs.readdirSync(petsDir, { withFileTypes: true });
+    var pets = [];
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
       if (!entry.isDirectory()) continue;
-      const manifestPath = path.join(petsDir, entry.name, 'pet.json');
-      if (!fs.existsSync(manifestPath)) {
-        logger.warn('Main', '跳过目录 "' + entry.name + '": 无 pet.json');
-        continue;
-      }
+      var manifestPath = path.join(petsDir, entry.name, 'pet.json');
+      if (!fs.existsSync(manifestPath)) continue;
       try {
-        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-        const pet = {
+        var manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        pets.push({
           id: entry.name,
           name: manifest.displayName || manifest.id || manifest.name,
           description: manifest.description || '',
           version: manifest.version || '1.0.0',
           installedAt: fs.statSync(manifestPath).mtime.toISOString(),
           spritesheetUrl: 'http://localhost:3001/api/pets/' + entry.name + '/spritesheet',
-        };
-        pets.push(pet);
-        logger.info('Main', '发现宠物: id="' + pet.id + '", name="' + pet.name + '"');
-        console.log('[Pet] 发现宠物:', entry.name, manifest.displayName);
-      } catch (err) {
-        logger.error('Main', '跳过损坏宠物 "' + entry.name + '": ' + err.message);
-        console.log('[Pet] 跳过损坏宠物:', entry.name, err.message);
-      }
+        });
+        logger.info('Main', '发现宠物: id="' + entry.name + '", name="' + (manifest.displayName || manifest.id) + '"');
+      } catch (e) { logger.error('Main', '跳过损坏宠物: ' + entry.name); }
     }
-    logger.info('Main', 'pet:list-installed 返回 ' + pets.length + ' 个宠物');
-    console.log('[Pet] 返回宠物列表:', pets.length);
-    return pets.sort((a, b) => a.name.localeCompare(b.name));
+    return pets.sort(function (a, b) { return a.name.localeCompare(b.name); });
   });
 
-  ipcMain.handle('pet:import-local', async (_event, sourceDir) => {
+  ipcMain.handle('pet:import-local', async function (_event, sourceDir) {
     logger.info('Main', 'pet:import-local: ' + sourceDir);
-    const home = process.env.USERPROFILE || process.env.HOME || '~';
-    const petsDir = path.join(home, '.aichat', 'pets');
-    if (!fs.existsSync(petsDir)) {
-      fs.mkdirSync(petsDir, { recursive: true });
-    }
-    const manifestPath = path.join(sourceDir, 'pet.json');
-    if (!fs.existsSync(manifestPath)) {
-      logger.error('Main', 'pet:import-local: 未找到 pet.json 在 ' + sourceDir);
-      return { success: false, error: '未找到 pet.json' };
-    }
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-    const petName = manifest.id || manifest.name || path.basename(sourceDir);
-    const destDir = path.join(petsDir, petName);
-    logger.info('Main', 'pet:import-local: 复制到 ' + destDir);
+    var home = process.env.USERPROFILE || process.env.HOME || '~';
+    var petsDir = path.join(home, '.aichat', 'pets');
+    if (!fs.existsSync(petsDir)) fs.mkdirSync(petsDir, { recursive: true });
+    var manifestPath = path.join(sourceDir, 'pet.json');
+    if (!fs.existsSync(manifestPath)) return { success: false, error: '未找到 pet.json' };
+    var manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    var petName = manifest.id || manifest.name || path.basename(sourceDir);
+    var destDir = path.join(petsDir, petName);
     fs.cpSync(sourceDir, destDir, { recursive: true });
     return {
       success: true,
@@ -305,86 +316,55 @@ app.whenReady().then(() => {
     };
   });
 
-  ipcMain.on('pet:action', (_event, action) => {
+  ipcMain.on('pet:action', function (_event, action) {
     logger.debug('Main', 'pet:action: ' + action.type);
     if (action.type === 'double-click') {
-      if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.show();
-        mainWindow.focus();
-      }
+      if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
     }
-    if (action.type === 'drag-move') {
-      if (petWindow && !petWindow.isDestroyed()) {
-        var pos = petWindow.getPosition();
-        petWindow.setPosition(pos[0] + (action.dx || 0), pos[1] + (action.dy || 0));
+    if (action.type === 'drag-end') {
+      if (action.x != null && action.y != null) {
+        var cfg = loadPetConfig();
+        cfg.position = 'custom';
+        cfg.customPosition = { x: action.x, y: action.y };
+        savePetConfig(cfg);
       }
     }
   });
 
-  // 拖拽开始：允许窗口接收鼠标事件
   ipcMain.on('pet:drag-start', function () {
-    if (petWindow && !petWindow.isDestroyed()) {
-      petWindow.setIgnoreMouseEvents(false);
-    }
+    if (petOverlay && !petOverlay.isDestroyed()) petOverlay.setIgnoreMouseEvents(false);
   });
 
-  // 拖拽结束：保存位置并恢复点击穿透
   ipcMain.on('pet:drag-end', function () {
-    if (petWindow && !petWindow.isDestroyed()) {
-      var bounds = petWindow.getBounds();
-      var cfg = loadConfig();
-      cfg.position = 'custom';
-      cfg.customPosition = { x: bounds.x, y: bounds.y };
-      saveConfig(cfg);
-      petWindow.setIgnoreMouseEvents(true, { forward: true });
-      petWindow.webContents.send('pet:enable-transparent');
-    }
+    if (petOverlay && !petOverlay.isDestroyed()) petOverlay.setIgnoreMouseEvents(true, { forward: true });
   });
 
-  // 日志查询（前端调试用）
-  ipcMain.handle('pet:tail-log', async (_event, lines) => {
+  ipcMain.handle('pet:tail-log', async function (_event, lines) {
     return logger.tail(lines || 50);
   });
 
-  // 首启：将预置社区桌宠安装到 ~/.aichat/pets/
+  // 预置宠物安装
   function installPresetPets() {
-    const home = process.env.USERPROFILE || process.env.HOME || '~';
-    const petsDir = path.join(home, '.aichat', 'pets');
-
-    // 生产模式：从 resources/preset-pets/ 读取；开发模式：从项目 assets/pets/ 读取
-    const presetDir = app.isPackaged
+    var home = process.env.USERPROFILE || process.env.HOME || '~';
+    var petsDir = path.join(home, '.aichat', 'pets');
+    var presetDir = app.isPackaged
       ? path.join(process.resourcesPath, 'preset-pets')
       : path.join(__dirname, '..', 'assets', 'pets');
 
-    logger.info('Main', 'installPresetPets: presetDir="' + presetDir + '", petsDir="' + petsDir + '"');
+    if (!fs.existsSync(presetDir)) { logger.warn('Main', '预置宠物目录不存在'); return; }
+    if (!fs.existsSync(petsDir)) fs.mkdirSync(petsDir, { recursive: true });
 
-    if (!fs.existsSync(presetDir)) {
-      logger.warn('Main', '预置宠物目录不存在: "' + presetDir + '"');
-      return;
-    }
-
-    if (!fs.existsSync(petsDir)) {
-      fs.mkdirSync(petsDir, { recursive: true });
-    }
-
-    const presetEntries = fs.readdirSync(presetDir, { withFileTypes: true });
+    var presetEntries = fs.readdirSync(presetDir, { withFileTypes: true });
     var installedCount = 0;
     for (var i = 0; i < presetEntries.length; i++) {
       var entry = presetEntries[i];
       if (!entry.isDirectory()) continue;
       var destDir = path.join(petsDir, entry.name);
-      if (fs.existsSync(destDir)) {
-        logger.debug('Main', '跳过预置宠物 "' + entry.name + '": 已存在');
-        continue;
-      }
+      if (fs.existsSync(destDir)) continue;
       try {
         fs.cpSync(path.join(presetDir, entry.name), destDir, { recursive: true });
-        logger.info('Main', '预置宠物已安装: "' + entry.name + '"');
         installedCount++;
-      } catch (err) {
-        logger.error('Main', '安装预置宠物 "' + entry.name + '" 失败: ' + err.message);
-      }
+      } catch (e) {}
     }
     logger.info('Main', '预置宠物安装完成，新安装 ' + installedCount + ' 个');
   }
@@ -394,50 +374,34 @@ app.whenReady().then(() => {
   startServer();
   setTimeout(createWindow, 2000);
 
-  const config = loadConfig();
+  var config = loadPetConfig();
   logger.info('Main', '启动配置: autoWake=' + config.autoWakeOnStartup + ', defaultPetId="' + (config.defaultPetId || '') + '"');
   if (config.autoWakeOnStartup && config.defaultPetId) {
-    setTimeout(() => {
+    setTimeout(function () {
       try {
-        logger.info('Main', '自动唤醒宠物: "' + config.defaultPetId + '"');
-        console.log('[Pet] 自动唤醒宠物:', config.defaultPetId);
-        const fullData = loadPetData(config.defaultPetId);
-        petWindow = createPetWindow(mainWindow);
-        if (petWindow) {
-          logger.info('Main', '自动唤醒: 宠物窗口已创建');
-          console.log('[Pet] 宠物窗口已创建');
-          petWindow.webContents.on('did-finish-load', () => {
-            logger.info('Main', '自动唤醒: pet.html 加载完成, 发送 pet:load');
-            petWindow.webContents.send('pet:load', fullData);
-          });
-          startFullscreenDetection(mainWindow, petWindow);
-        }
+        var fullData = loadPetData(config.defaultPetId);
+        fullData.zoom = config.zoom || 1.0;
+        fullData.config = config;
+        var overlay = createPetOverlay();
+        overlay.webContents.on('did-finish-load', function () {
+          overlay.webContents.send('pet:load', fullData);
+        });
+        startFullscreenDetection(mainWindow, overlay);
       } catch (err) {
         logger.error('Main', '自动唤醒失败: ' + err.message);
-        console.error('[Pet] 自动唤醒失败:', err.message);
       }
     }, 3000);
-  } else {
-    console.log('[Pet] 跳过自动唤醒 (autoWake=%s, defaultPetId=%s)', config.autoWakeOnStartup, config.defaultPetId);
   }
 });
 
-app.on('before-quit', () => {
-  app.isQuitting = true;
-});
+app.on('before-quit', function () { app.isQuitting = true; });
 
-app.on('window-all-closed', () => {
+app.on('window-all-closed', function () {
   globalShortcut.unregisterAll();
   stopFullscreenDetection();
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+  if (process.platform !== 'darwin') app.quit();
 });
 
-app.on('activate', () => {
-  if (mainWindow === null) {
-    createWindow();
-  } else {
-    mainWindow.show();
-  }
+app.on('activate', function () {
+  if (mainWindow === null) createWindow(); else mainWindow.show();
 });

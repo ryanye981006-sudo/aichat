@@ -5,10 +5,11 @@ import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
-import { createPetWindow, updatePetWindow, sendPetEvent, loadConfig, saveConfig } from './pet-window.mjs';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 const logger = require('./logger.cjs');
+
+// 全屏宠物覆盖层（不导入 pet-window.mjs，此处自包含）
 
 // 记录崩溃日志到桌面的辅助函数（进程崩溃后日志不会丢失）
 function crashLog(msg) {
@@ -33,7 +34,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = !app.isPackaged;
 
 let mainWindow = null;
-let petWindow = null;
 let tray = null;
 let serverChild = null;
 
@@ -78,7 +78,7 @@ function createTray() {
       click: () => {
         app.isQuitting = true;
         stopFullscreenDetection();
-        if (petWindow && !petWindow.isDestroyed()) petWindow.close();
+        if (petOverlay && !petOverlay.isDestroyed()) petOverlay.close();
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
       },
     },
@@ -92,6 +92,54 @@ function createTray() {
       mainWindow.focus();
     }
   });
+}
+
+// ---- 宠物全屏覆盖层（替代独立小窗口） ----
+let petOverlay = null;
+const PET_CONFIG_PATH = path.join((process.env.USERPROFILE || process.env.HOME || os.homedir?.() || '~'), '.aichat', 'pet-config.json');
+
+function getPetConfigPath() { return PET_CONFIG_PATH; }
+function loadPetConfig() {
+  try {
+    if (fs.existsSync(PET_CONFIG_PATH)) return JSON.parse(fs.readFileSync(PET_CONFIG_PATH, 'utf-8'));
+  } catch {}
+  return { defaultPetId: null, zoom: 1.0, position: 'bottom-right', customPosition: null, autoWakeOnStartup: true };
+}
+function savePetConfig(cfg) {
+  const dir = path.dirname(PET_CONFIG_PATH);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(PET_CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf-8');
+}
+
+function createPetOverlay() {
+  if (petOverlay && !petOverlay.isDestroyed()) {
+    petOverlay.close();
+  }
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+  const { x, y } = primaryDisplay.workArea;
+
+  petOverlay = new BrowserWindow({
+    x, y, width, height,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    focusable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  petOverlay.loadFile(path.join(__dirname, 'pet.html'));
+  petOverlay.setIgnoreMouseEvents(true, { forward: true });
+
+  logger.info('Main', `全屏宠物覆盖层已创建: ${width}x${height}+${x}+${y}`);
+  return petOverlay;
 }
 
 function createWindow() {
@@ -187,7 +235,9 @@ function startServer() {
           const event = JSON.parse(line.slice('PET_EVENT:'.length));
           if (event.type && event.type.startsWith('session:')) {
             logger.debug('Main', `收到 PET_EVENT: ${event.type}`);
-            sendPetEvent(petWindow, event);
+            if (petOverlay && !petOverlay.isDestroyed()) {
+              petOverlay.webContents.send('pet:event', event);
+            }
           }
         } catch {
           // ignore
@@ -288,40 +338,38 @@ app.whenReady().then(() => {
 
   ipcMain.on('pet:activate', (_event, petData) => {
     logger.info('Main', `pet:activate 收到请求: ${JSON.stringify(petData)}`);
-    if (petWindow && !petWindow.isDestroyed()) {
-      logger.info('Main', '关闭旧的宠物窗口');
-      petWindow.close();
-    }
-    petWindow = createPetWindow(mainWindow);
-    logger.info('Main', `宠物窗口已创建, id=${petWindow.id}`);
-    const config = loadConfig();
+    const overlay = createPetOverlay();
+    const config = loadPetConfig();
     config.defaultPetId = petData.id;
-    saveConfig(config);
+    savePetConfig(config);
     const fullData = loadPetData(petData.id);
     fullData.zoom = petData.zoom || 1.0;
-    petWindow.webContents.on('did-finish-load', () => {
+    fullData.config = config;
+    overlay.webContents.on('did-finish-load', () => {
       logger.info('Main', 'pet.html 加载完成, 发送 pet:load 数据');
-      petWindow.webContents.send('pet:load', fullData);
+      overlay.webContents.send('pet:load', fullData);
     });
-    startFullscreenDetection(mainWindow, petWindow);
+    startFullscreenDetection(mainWindow, overlay);
   });
 
   ipcMain.on('pet:deactivate', () => {
     logger.info('Main', 'pet:deactivate 收到请求');
-    if (petWindow && !petWindow.isDestroyed()) {
-      logger.info('Main', '关闭宠物窗口');
+    if (petOverlay && !petOverlay.isDestroyed()) {
       stopFullscreenDetection();
-      petWindow.close();
-      petWindow = null;
+      petOverlay.close();
+      petOverlay = null;
     }
-    const config = loadConfig();
+    const config = loadPetConfig();
     config.defaultPetId = null;
-    saveConfig(config);
+    savePetConfig(config);
   });
 
   ipcMain.on('pet:update-config', (_event, config) => {
     logger.debug('Main', `pet:update-config: ${JSON.stringify(config)}`);
-    updatePetWindow(petWindow, config);
+    if (petOverlay && !petOverlay.isDestroyed()) {
+      petOverlay.webContents.send('pet:update-config', config);
+    }
+    savePetConfig(config);
   });
 
   ipcMain.handle('pet:import-url', async (_event, url) => {
@@ -414,31 +462,28 @@ app.whenReady().then(() => {
         mainWindow.focus();
       }
     }
-    if (action.type === 'drag-move') {
-      if (petWindow && !petWindow.isDestroyed()) {
-        const [x, y] = petWindow.getPosition();
-        petWindow.setPosition(x + (action.dx || 0), y + (action.dy || 0));
+    if (action.type === 'drag-end') {
+      // 保存拖拽后的位置
+      if (action.x != null && action.y != null) {
+        const cfg = loadPetConfig();
+        cfg.position = 'custom';
+        cfg.customPosition = { x: action.x, y: action.y };
+        savePetConfig(cfg);
       }
     }
   });
 
-  // 拖拽开始：允许窗口接收鼠标事件
+  // 拖拽开始：允许覆盖层接收鼠标事件
   ipcMain.on('pet:drag-start', () => {
-    if (petWindow && !petWindow.isDestroyed()) {
-      petWindow.setIgnoreMouseEvents(false);
+    if (petOverlay && !petOverlay.isDestroyed()) {
+      petOverlay.setIgnoreMouseEvents(false);
     }
   });
 
-  // 拖拽结束：保存位置并恢复点击穿透
+  // 拖拽结束：恢复点击穿透
   ipcMain.on('pet:drag-end', () => {
-    if (petWindow && !petWindow.isDestroyed()) {
-      const bounds = petWindow.getBounds();
-      const cfg = loadConfig();
-      cfg.position = 'custom';
-      cfg.customPosition = { x: bounds.x, y: bounds.y };
-      saveConfig(cfg);
-      petWindow.setIgnoreMouseEvents(true, { forward: true });
-      petWindow.webContents.send('pet:enable-transparent');
+    if (petOverlay && !petOverlay.isDestroyed()) {
+      petOverlay.setIgnoreMouseEvents(true, { forward: true });
     }
   });
 
@@ -494,21 +539,21 @@ app.whenReady().then(() => {
   startServer();
   setTimeout(createWindow, 2000);
 
-  const config = loadConfig();
+  const config = loadPetConfig();
   logger.info('Main', `启动配置: autoWake=${config.autoWakeOnStartup}, defaultPetId="${config.defaultPetId}"`);
   if (config.autoWakeOnStartup && config.defaultPetId) {
     setTimeout(() => {
       try {
         logger.info('Main', `自动唤醒宠物: "${config.defaultPetId}"`);
         const fullData = loadPetData(config.defaultPetId);
-        petWindow = createPetWindow(mainWindow);
-        if (petWindow) {
-          petWindow.webContents.on('did-finish-load', () => {
-            logger.info('Main', '自动唤醒: pet.html 加载完成, 发送 pet:load');
-            petWindow.webContents.send('pet:load', fullData);
-          });
-          startFullscreenDetection(mainWindow, petWindow);
-        }
+        fullData.zoom = config.zoom || 1.0;
+        fullData.config = config;
+        const overlay = createPetOverlay();
+        overlay.webContents.on('did-finish-load', () => {
+          logger.info('Main', '自动唤醒: pet.html 加载完成, 发送 pet:load');
+          overlay.webContents.send('pet:load', fullData);
+        });
+        startFullscreenDetection(mainWindow, overlay);
       } catch (err) {
         logger.error('Main', `自动唤醒失败: ${err.message}`);
         console.error('[Pet] 自动唤醒失败:', err.message);
