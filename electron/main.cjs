@@ -198,11 +198,11 @@ app.whenReady().then(function () {
     }
     if (!raw.animations || Object.keys(raw.animations).length === 0) {
       raw.animations = {
-        idle: { row: 0, frames: 6, fps: 6 }, waving: { row: 1, frames: 4, fps: 6 },
-        review: { row: 2, frames: 6, fps: 6 }, runningRight: { row: 3, frames: 8, fps: 8 },
-        jumping: { row: 4, frames: 5, fps: 7 }, grab: { row: 5, frames: 8, fps: 7 },
-        failed: { row: 6, frames: 8, fps: 7 }, grabbing: { row: 7, frames: 6, fps: 6 },
-        runningLeft: { row: 8, frames: 8, fps: 8 },
+        idle: { row: 0, frames: 6, fps: 6 }, runningRight: { row: 1, frames: 8, fps: 8 },
+        runningLeft: { row: 2, frames: 8, fps: 8 }, waving: { row: 3, frames: 4, fps: 6 },
+        jumping: { row: 4, frames: 5, fps: 7 }, failed: { row: 5, frames: 8, fps: 7 },
+        grab: { row: 6, frames: 6, fps: 6 }, grabbing: { row: 7, frames: 6, fps: 8 },
+        review: { row: 8, frames: 6, fps: 6 },
       };
     }
 
