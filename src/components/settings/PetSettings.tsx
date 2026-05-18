@@ -29,8 +29,6 @@ export default function PetSettings() {
   const [electronDebug, setElectronDebug] = useState('');
 
   useEffect(() => { loadPets(); }, []);
-    return () => clearInterval(timer);
-  }, []);
 
   async function loadPets() {
     const api = eApi();
