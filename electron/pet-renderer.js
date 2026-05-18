@@ -229,115 +229,135 @@
     setInitialPosition(petData.config);
     resizeCanvas();
 
-    var ssUrl = petData.spritesheetDataUrl || petData.spritesheetUrl;
-    petLog('INFO', '加载 spritesheet: ' + (petData.spritesheetDataUrl ? '(base64)' : ssUrl));
+    // 通过 IPC invoke 读取 spritesheet 文件（Buffer → Blob URL，无大小限制）
+    var ssPath = petData.path + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp');
+    petLog('INFO', '加载 spritesheet: ' + ssPath);
 
-    var img = new Image();
-    img.onload = function () {
-      petLog('INFO', 'spritesheet 加载成功! ' + img.width + 'x' + img.height);
-      spritesheet = img;
-      setState('idle');
-    };
-    img.onerror = function () {
-      petLog('ERROR', 'spritesheet 加载失败');
-    };
-    img.src = ssUrl;
+    api.petReadFile(ssPath).then(function (result) {
+      if (!result || !result.ok) {
+        petLog('ERROR', '读取失败: ' + (result ? result.error : 'unknown'));
+        // 回退 HTTP
+        var fallback = petData.spritesheetUrl;
+        if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback); }
+        return;
+      }
+      // Buffer → Uint8Array → Blob → Object URL
+      var buf = new Uint8Array(result.data);
+      var mime = ssPath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/webp';
+      var blob = new Blob([buf], { type: mime });
+      var blobUrl = URL.createObjectURL(blob);
+      petLog('INFO', 'Blob URL 已创建: ' + blobUrl.substring(0, 40) + '...');
+      loadImage(blobUrl);
+    }).catch(function (err) {
+      petLog('ERROR', 'IPC 读取异常: ' + err.message);
+      var fallback = petData.spritesheetUrl;
+      if (fallback) { petLog('INFO', '回退 HTTP: ' + fallback); loadImage(fallback); }
+    });
+
+    function loadImage(url) {
+      var img = new Image();
+      img.onload = function () {
+        petLog('INFO', 'spritesheet 加载成功! ' + img.width + 'x' + img.height);
+        spritesheet = img;
+        setState('idle');
+      };
+      img.onerror = function () {
+        petLog('ERROR', 'spritesheet 加载失败: ' + url.substring(0, 60));
+      };
+      img.src = url;
+    }
   }
 
   // === 鼠标交互 ===
+  // forward:true 时 mousemove 仍会到达页面，但 mousedown/mouseup 不会。
+  // 策略：通过 window mousemove 检测鼠标接近宠物 → 关闭穿透 → 接收 mousedown 开始拖拽 → mouseup 结束拖拽 → 恢复穿透
   let isDragging = false;
+  let isMouseNear = false;
   let dragStartScreenX = 0, dragStartScreenY = 0;
   let dragStartPetX = 0, dragStartPetY = 0;
   let dragCumDX = 0, dragCumDY = 0;
   let hoverTimer = null;
 
-  function isOpaquePixel(x, y) {
-    if (!spritesheet || !petManifest) return true;
-    var sprite = getSprite();
-    var sx = Math.floor(x / scale);
-    var sy = Math.floor(y / scale);
-    if (sx < 0 || sy < 0 || sx >= sprite.width || sy >= sprite.height) return false;
-    // 快速检测：用 canvas 当前位置判断
-    return true;
+  function petRect() {
+    return {
+      left: petX, top: petY,
+      right: petX + Math.round(192 * scale),
+      bottom: petY + Math.round(208 * scale),
+    };
   }
 
-  function updateMousePassthrough(e) {
-    if (isDragging) return;
-    // 检测鼠标是否在宠物范围内
-    var rect = canvas.getBoundingClientRect();
-    var inBounds = e.clientX >= rect.left && e.clientX <= rect.right &&
-                   e.clientY >= rect.top && e.clientY <= rect.bottom;
-    if (!inBounds) {
-      api.sendPetAction({ type: 'mouse-leave' });
+  function isNearPet(clientX, clientY) {
+    var r = petRect();
+    var margin = 8; // 边缘容差
+    return clientX >= r.left - margin && clientX <= r.right + margin &&
+           clientY >= r.top - margin && clientY <= r.bottom + margin;
+  }
+
+  // window mousemove 在 forward:true 时仍能触发，用于检测接近
+  window.addEventListener('mousemove', function (e) {
+    var near = isNearPet(e.clientX, e.clientY);
+    if (near && !isMouseNear) {
+      isMouseNear = true;
+      api.sendDragStart(); // → setIgnoreMouseEvents(false)，现在可以接收 mousedown
+    } else if (!near && isMouseNear && !isDragging) {
+      isMouseNear = false;
+      clearHoverTimer();
+      api.sendDragEnd();   // → setIgnoreMouseEvents(true)，恢复穿透
     }
-  }
 
+    if (isDragging) {
+      var sdx = e.screenX - dragStartScreenX;
+      var sdy = e.screenY - dragStartScreenY;
+      dragCumDX = Math.abs(sdx);
+      dragCumDY = Math.abs(sdy);
+
+      // 拖拽方向动画
+      if (dragCumDX > 8 || dragCumDY > 8) {
+        if (dragCumDX > dragCumDY) {
+          playAnimation(sdx > 0 ? 'runningRight' : 'runningLeft', {});
+        } else {
+          playAnimation(sdy > 0 ? 'jumping' : 'waving', {});
+        }
+      }
+
+      petX = dragStartPetX + sdx;
+      petY = dragStartPetY + sdy;
+      applyPosition();
+    }
+
+    // 悬停检测
+    if (!isDragging && near && currentState === 'idle') {
+      if (!hoverTimer) {
+        hoverTimer = setTimeout(function () {
+          if (!isDragging && currentState === 'idle') playAnimation('waving', {});
+        }, 600);
+      }
+    }
+  });
+
+  // mousedown 在穿透关闭后到达
   canvas.addEventListener('mousedown', function (e) {
     if (e.button !== 0) return;
     isDragging = true;
-    dragCumDX = 0;
-    dragCumDY = 0;
+    dragCumDX = 0; dragCumDY = 0;
     dragStartScreenX = e.screenX;
     dragStartScreenY = e.screenY;
     dragStartPetX = petX;
     dragStartPetY = petY;
     clearHoverTimer();
-
-    petLog('DEBUG', '拖拽开始: petX=' + Math.round(petX) + ', petY=' + Math.round(petY));
-    api.sendDragStart();
+    petLog('DEBUG', '拖拽开始');
+    // 穿透已在 mousemove 接近时关闭
   });
 
-  canvas.addEventListener('mousemove', function (e) {
-    if (isDragging) {
-      var dx = e.screenX - dragStartScreenX;
-      var dy = e.screenY - dragStartScreenY;
-      dragCumDX += Math.abs(dx);
-      dragCumDY += Math.abs(dy);
-
-      // 拖拽方向动画
-      var absDX = Math.abs(e.screenX - dragStartScreenX);
-      var absDY = Math.abs(e.screenY - dragStartScreenY);
-      if (absDX > 8 || absDY > 8) {
-        if (absDX > absDY) {
-          playAnimation(e.screenX > dragStartScreenX ? 'runningRight' : 'runningLeft', {});
-        } else {
-          playAnimation(e.screenY > dragStartScreenY ? 'jumping' : 'waving', {});
-        }
-      }
-
-      petX = dragStartPetX + dx;
-      petY = dragStartPetY + dy;
-      applyPosition();
-    } else {
-      // 悬停检测
-      var rect = canvas.getBoundingClientRect();
-      var over = e.clientX >= rect.left && e.clientX <= rect.right &&
-                 e.clientY >= rect.top && e.clientY <= rect.bottom;
-      if (over && currentState === 'idle') {
-        if (!hoverTimer) {
-          hoverTimer = setTimeout(function () {
-            if (!isDragging && currentState === 'idle') playAnimation('waving', {});
-          }, 600);
-        }
-      } else if (!over) {
-        clearHoverTimer();
-      }
-    }
-  });
-
+  // mouseup 也在穿透关闭后到达
   window.addEventListener('mouseup', function (e) {
     if (!isDragging) return;
     petLog('DEBUG', '拖拽结束: dx=' + dragCumDX + ', dy=' + dragCumDY);
-
-    // 保存位置
     api.sendPetAction({ type: 'drag-end', x: petX, y: petY });
-    api.sendDragEnd();
-
+    api.sendDragEnd();  // 恢复穿透
     isDragging = false;
-    dragCumDX = 0;
-    dragCumDY = 0;
-
-    // 恢复 idle
+    isMouseNear = false;
+    dragCumDX = 0; dragCumDY = 0;
     setTimeout(function () { if (!isDragging) setState('idle'); }, 200);
   });
 
@@ -345,7 +365,6 @@
     if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
   }
 
-  // 双击呼出主窗口
   canvas.addEventListener('dblclick', function () {
     api.sendPetAction({ type: 'double-click' });
   });

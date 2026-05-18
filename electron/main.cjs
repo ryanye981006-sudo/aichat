@@ -200,20 +200,14 @@ app.whenReady().then(function () {
       };
     }
 
-    // Base64 data URL
     var ssPath = path.join(petPath, raw.sprite.url);
-    var spritesheetDataUrl = null;
     if (!fs.existsSync(ssPath)) {
       logger.error('Main', 'spritesheet 文件不存在: ' + ssPath);
     } else {
       logger.info('Main', 'spritesheet 已确认存在: ' + ssPath + ' (' + fs.statSync(ssPath).size + ' bytes)');
-      var ssBuffer = fs.readFileSync(ssPath);
-      var ext = path.extname(ssPath).toLowerCase();
-      var mime = ext === '.png' ? 'image/png' : 'image/webp';
-      spritesheetDataUrl = 'data:' + mime + ';base64,' + ssBuffer.toString('base64');
     }
 
-    return { id: petId, path: petPath, manifest: raw, spritesheetUrl: 'http://localhost:3001/api/pets/' + petId + '/spritesheet', spritesheetDataUrl: spritesheetDataUrl };
+    return { id: petId, path: petPath, manifest: raw, spritesheetUrl: 'http://localhost:3001/api/pets/' + petId + '/spritesheet' };
   }
 
   // 宠物 IPC
@@ -341,6 +335,17 @@ app.whenReady().then(function () {
 
   ipcMain.handle('pet:tail-log', async function (_event, lines) {
     return logger.tail(lines || 50);
+  });
+
+  // 渲染进程读取文件（返回 Buffer，无大小限制）
+  ipcMain.handle('pet:read-file', async function (_event, filePath) {
+    try {
+      if (!fs.existsSync(filePath)) return { ok: false, error: '文件不存在' };
+      var buf = fs.readFileSync(filePath);
+      return { ok: true, data: buf };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   // 预置宠物安装

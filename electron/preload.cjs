@@ -20,6 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   petImportLocal: (sourceDir) => ipcRenderer.invoke('pet:import-local', sourceDir),
   petTailLog: (lines) => ipcRenderer.invoke('pet:tail-log', lines || 50),
 
+  // ---- 宠物渲染进程：读取文件（IPC invoke，Buffer 自动序列化，无大小限制） ---
+  petReadFile: (filePath) => ipcRenderer.invoke('pet:read-file', filePath),
+
   // ---- 宠物状态事件（宠物渲染进程使用） ----
   onPetEvent: (callback) => {
     ipcRenderer.on('pet:event', (_event, data) => callback(data));
