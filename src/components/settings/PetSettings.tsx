@@ -283,6 +283,27 @@ export default function PetSettings() {
               支持 pet.json + spritesheet.webp 格式
             </div>
           </div>
+
+          <div style={{ marginTop: 16, padding: '12px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--warn)', background: 'rgba(255,193,7,0.06)' }}>
+            <div style={{ fontSize: 12, color: 'var(--warn)', lineHeight: 1.7 }}>
+              💡 从社区下载的桌宠包（.zip）需先解压，再拖入解压后的文件夹
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20, padding: '14px 18px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-soft)', background: 'var(--chat-bg)' }}>
+            <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--muted-soft)', marginBottom: 8 }}>
+              从开源社区获取桌宠
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted-soft)', lineHeight: 1.9 }}>
+              你可以在以下开源社区找到更多桌宠素材：
+              <br />
+              ▸ <a href="https://petdex.crafter.run" target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontWeight: 500 }}>Petdex 画廊</a> — 最活跃的 Codex Pet 社区，750+ 免费桌宠可供下载
+              <br />
+              ▸ <a href="https://codex-pets.net" target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontWeight: 500 }}>Codex Pets 分享站</a> — 官方分享平台
+              <br />
+              ▸ <a href="https://github.com/topics/codex-pet" target="_blank" rel="noopener" style={{ color: 'var(--accent)', fontWeight: 500 }}>GitHub Codex Pet 主题</a> — 开源桌宠合集
+            </div>
+          </div>
         </div>
       )}
     </div>
