@@ -76,18 +76,19 @@ if (existsSync(emojiDataDir)) {
   log('emoji-picker-element-data 未安装（不在后端依赖中）');
 }
 
-// 4. 构建（使用时间戳输出目录，规避 Windows Defender 锁文件）
+// 4. 构建（使用临时输出目录避免 Windows Defender 锁文件，完成后复制到 release/）
 log('运行 electron-builder...');
 
 // 从根 package.json 读取 electron 精确版本（Phase 1.5 已改为精确版）
 const rootPkg = JSON.parse(readFileSync('package.json', 'utf-8'));
 const electronVersion = rootPkg.devDependencies?.electron?.replace(/^[\^~]/, '') || '42.0.1';
+const appVersion = rootPkg.version || '0.0.0';
 
 let buildSuccess = false;
 const maxRetries = 3;
-// 每次构建使用独立输出目录，规避 Windows Defender 锁定旧 exe
+// 临时构建目录（避免 Defender 锁 release/ 下的旧 exe）
 const buildId = Date.now().toString(36);
-const finalOutDir = `release-${buildId}`;
+const tmpOutDir = `release-tmp-${buildId}`;
 
 try {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -95,25 +96,24 @@ try {
       if (attempt > 1) {
         log(`重试第 ${attempt} 次（等待 Defender 释放文件锁）...`);
       }
-      const outDir = `${finalOutDir}-${attempt}`;
+      const outDir = `${tmpOutDir}-${attempt}`;
       execSync(
         `npx electron-builder@26.8.1 -c.electronVersion=${electronVersion} -c.directories.output=${outDir}`,
         { stdio: 'inherit' }
       );
-      // 将最终成功的构建目录重命名为固定名 release
-      if (outDir !== finalOutDir) {
-        try { rmSync(finalOutDir, { recursive: true, force: true }); } catch {}
+      // 将构建产物合并到固定 release/ 目录
+      if (outDir !== tmpOutDir) {
+        try { rmSync(tmpOutDir, { recursive: true, force: true }); } catch {}
         try {
-          renameSync(path.resolve(outDir), path.resolve(finalOutDir));
+          renameSync(path.resolve(outDir), path.resolve(tmpOutDir));
         } catch {
-          // rename 失败（跨卷/权限），回退到 xcopy
-          execSync(`xcopy /E /I /Y "${path.resolve(outDir)}" "${path.resolve(finalOutDir)}"`, { stdio: 'inherit' });
+          execSync(`xcopy /E /I /Y "${path.resolve(outDir)}" "${path.resolve(tmpOutDir)}"`, { stdio: 'inherit' });
           try { rmSync(path.resolve(outDir), { recursive: true, force: true }); } catch {}
         }
       }
       // 清理其他临时构建目录
       for (const entry of readdirSync(path.resolve('.'))) {
-        if (entry.startsWith('release-') && entry !== finalOutDir) {
+        if (entry.startsWith('release-tmp-') && entry !== tmpOutDir) {
           try { rmSync(path.resolve(entry), { recursive: true, force: true }); } catch {}
         }
       }
@@ -128,10 +128,26 @@ try {
       }
     }
   }
+
   if (buildSuccess) {
-    log(`打包完成，输出目录: ${finalOutDir}`);
-    log(`  - 解包版: ${finalOutDir}/win-unpacked/`);
-    log(`  - 压缩包: ${finalOutDir}/aichat-1.0.0-win.zip`);
+    // 合并到固定 release/ 目录（不删除已有文件）
+    const releaseDir = path.resolve('release');
+    if (!existsSync(releaseDir)) {
+      mkdirSync(releaseDir, { recursive: true });
+    }
+    execSync(`xcopy /E /I /Y "${path.resolve(tmpOutDir)}\\*" "${releaseDir}\\"`, { stdio: 'inherit' });
+    // 清理临时目录
+    try { rmSync(path.resolve(tmpOutDir), { recursive: true, force: true }); } catch {}
+    // 清理残留的临时目录
+    for (const entry of readdirSync(path.resolve('.'))) {
+      if (entry.startsWith('release-tmp-')) {
+        try { rmSync(path.resolve(entry), { recursive: true, force: true }); } catch {}
+      }
+    }
+
+    log(`打包完成，输出目录: release/`);
+    log(`  - 解包版: release/win-unpacked/`);
+    log(`  - 压缩包: release/aichat-${appVersion}-win.zip`);
   }
 } finally {
   // 5. 清理临时 server/node_modules
