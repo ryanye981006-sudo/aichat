@@ -422,21 +422,53 @@ app.whenReady().then(() => {
     return pets.sort((a, b) => a.name.localeCompare(b.name));
   });
 
-  ipcMain.handle('pet:import-local', async (_event, sourceDir) => {
-    logger.info('Main', `pet:import-local: ${sourceDir}`);
+  ipcMain.handle('pet:import-local', async (_event, sourceArg) => {
+    // 兼容文件路径：如果传入的是文件路径，推导为父目录
+    let sourceDir = sourceArg;
+    const sourceStat = fs.statSync(sourceArg, { throwIfNoEntry: false });
+    if (sourceStat && sourceStat.isFile()) {
+      sourceDir = path.dirname(sourceArg);
+    } else if (!sourceStat) {
+      logger.error('Main', `pet:import-local: 路径不存在 ${sourceArg}`);
+      return { success: false, error: '源路径不存在' };
+    }
+    logger.info('Main', `pet:import-local: ${sourceArg} → ${sourceDir}`);
+
     const home = process.env.USERPROFILE || process.env.HOME || '~';
     const petsDir = path.join(home, '.aichat', 'pets');
     if (!fs.existsSync(petsDir)) fs.mkdirSync(petsDir, { recursive: true });
+
     const manifestPath = path.join(sourceDir, 'pet.json');
     if (!fs.existsSync(manifestPath)) {
       logger.error('Main', `pet:import-local: 未找到 pet.json 在 ${sourceDir}`);
-      return { success: false, error: '未找到 pet.json' };
+      return { success: false, error: '未找到 pet.json，请确保拖入的是包含 pet.json 的文件夹或文件' };
     }
-    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    } catch (e) {
+      logger.error('Main', `pet:import-local: pet.json 解析失败: ${e.message}`);
+      return { success: false, error: `pet.json 格式错误: ${e.message}` };
+    }
+
     const petName = manifest.id || manifest.name || path.basename(sourceDir);
     const destDir = path.join(petsDir, petName);
+
+    // 覆盖前检查
+    if (fs.existsSync(destDir)) {
+      logger.info('Main', `pet:import-local: 已存在，覆盖 ${destDir}`);
+      fs.rmSync(destDir, { recursive: true, force: true });
+    }
+
     logger.info('Main', `pet:import-local: 复制到 ${destDir}`);
-    fs.cpSync(sourceDir, destDir, { recursive: true });
+    try {
+      fs.cpSync(sourceDir, destDir, { recursive: true });
+    } catch (e) {
+      logger.error('Main', `pet:import-local: 复制失败: ${e.message}`);
+      return { success: false, error: `文件复制失败: ${e.message}` };
+    }
+
     return {
       success: true,
       pet: {
@@ -447,6 +479,24 @@ app.whenReady().then(() => {
         installedAt: new Date().toISOString(),
       },
     };
+  });
+
+  // 删除宠物
+  ipcMain.handle('pet:delete', async (_event, petId) => {
+    logger.info('Main', `pet:delete: ${petId}`);
+    const home = process.env.USERPROFILE || process.env.HOME || '~';
+    const petDir = path.join(home, '.aichat', 'pets', petId);
+    if (!fs.existsSync(petDir)) {
+      return { success: false, error: '宠物目录不存在' };
+    }
+    try {
+      fs.rmSync(petDir, { recursive: true, force: true });
+      logger.info('Main', `pet:delete: 已删除 ${petDir}`);
+      return { success: true };
+    } catch (e) {
+      logger.error('Main', `pet:delete: 删除失败: ${e.message}`);
+      return { success: false, error: `删除失败: ${e.message}` };
+    }
   });
 
   ipcMain.on('pet:action', (_event, action) => {

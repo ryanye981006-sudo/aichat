@@ -21,6 +21,7 @@ export default function PetSettings() {
   const [autoWake, setAutoWake] = useState(true);
   const [dragOver, setDragOver] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [notify, setNotify] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [electronOk, setElectronOk] = useState(true);
@@ -87,11 +88,20 @@ export default function PetSettings() {
 
   async function deletePet(petId: string) {
     if (!confirm('确定要删除这只桌宠吗？此操作不可撤销。')) return;
+    setNotify(null);
     const api = eApi();
     if (api) {
       if (activePetId === petId) { api.petDeactivate(); setActivePetId(null); }
+      const result = await api.petDelete(petId);
+      if (result?.success) {
+        setNotify({ type: 'success', message: '桌宠已删除' });
+        setPets(prev => prev.filter(p => p.id !== petId));
+      } else {
+        setNotify({ type: 'error', message: result?.error || '删除失败' });
+      }
+    } else {
+      setPets(prev => prev.filter(p => p.id !== petId));
     }
-    setPets(prev => prev.filter(p => p.id !== petId));
   }
 
   const handleZoomChange = (value: number) => {
@@ -112,17 +122,44 @@ export default function PetSettings() {
   async function handleFileImport(files: FileList | null) {
     if (!files || files.length === 0) return;
     setLoading(true);
+    setNotify(null);
     try {
       const api = eApi();
-      if (api) await api.petImportLocal((files[0] as any).path || files[0].name);
-      await loadPets();
-    } catch (err) { console.error('导入失败:', err); }
-    finally { setLoading(false); }
+      if (!api) {
+        setNotify({ type: 'error', message: '桌宠功能需要 Electron 桌面环境' });
+        return;
+      }
+      const result = await api.petImportLocal((files[0] as any).path || files[0].name);
+      if (result?.success) {
+        setNotify({ type: 'success', message: `桌宠「${result.pet?.name || ''}」导入成功` });
+        await loadPets();
+      } else {
+        setNotify({ type: 'error', message: result?.error || '导入失败' });
+      }
+    } catch (err: any) {
+      setNotify({ type: 'error', message: `导入失败: ${err.message || err}` });
+    } finally { setLoading(false); }
   }
 
 
   return (
     <div style={{ padding: '24px', overflowY: 'auto', flex: 1 }}>
+      {/* 通知 */}
+      {notify && (
+        <div onClick={() => setNotify(null)}
+          style={{
+            marginBottom: 16, padding: '10px 16px', borderRadius: 'var(--radius-md)',
+            cursor: 'pointer', fontSize: 13, fontWeight: 500,
+            background: notify.type === 'success' ? 'rgba(76,175,80,0.1)' : 'rgba(244,67,54,0.08)',
+            border: `1px solid ${notify.type === 'success' ? 'rgba(76,175,80,0.3)' : 'rgba(244,67,54,0.25)'}`,
+            color: notify.type === 'success' ? '#2e7d32' : '#c62828',
+          }}
+        >
+          {notify.type === 'success' ? '✅ ' : '❌ '}{notify.message}
+          <span style={{ float: 'right', opacity: 0.5, fontSize: 11, lineHeight: '18px' }}>点击关闭</span>
+        </div>
+      )}
+
       {/* 子标签 */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexShrink: 0 }}>
         <button onClick={() => setSubTab('installed')} style={subTabBtnStyle(subTab === 'installed')}>

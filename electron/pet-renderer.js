@@ -74,16 +74,24 @@
   var currentBlobUrl = null;  // 当前活跃 Blob URL，用于 revoke
 
   // === 定位相关 ===
+  // 使用 left/top + CSS width/height 定位（而非 transform: scale），
+  // 让 image-rendering: pixelated 作用于 canvas 的 CSS 缩放
   function applyPosition() {
-    canvas.style.transform = 'translate(' + Math.round(petX) + 'px, ' + Math.round(petY) + 'px) scale(' + scale + ')';
-    canvas.style.transformOrigin = 'top left';
+    var sprite = getSprite();
+    var w = Math.round(sprite.width * scale);
+    var h = Math.round(sprite.height * scale);
+    canvas.style.left = Math.round(petX) + 'px';
+    canvas.style.top = Math.round(petY) + 'px';
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
   }
 
   function setInitialPosition(config) {
     var winW = window.innerWidth;
     var winH = window.innerHeight;
-    var petW = Math.round(192 * scale);
-    var petH = Math.round(208 * scale);
+    var sprite = getSprite();
+    var petW = Math.round(sprite.width * scale);
+    var petH = Math.round(sprite.height * scale);
     var margin = 20;
 
     if (config && config.position === 'custom' && config.customPosition) {
@@ -415,10 +423,11 @@
   let exitDebounceTimer = null;
 
   function petRect() {
+    var sprite = getSprite();
     return {
       left: petX, top: petY,
-      right: petX + Math.round(192 * scale),
-      bottom: petY + Math.round(208 * scale),
+      right: petX + Math.round(sprite.width * scale),
+      bottom: petY + Math.round(sprite.height * scale),
     };
   }
 
@@ -565,7 +574,7 @@
   canvas.style.position = 'absolute';
   canvas.style.left = '0';
   canvas.style.top = '0';
-  canvas.style.willChange = 'transform';
+  canvas.style.imageRendering = 'pixelated';
   setInitialPosition(null);  // 默认右下角
 
   offCtx.fillStyle = 'rgba(136, 153, 184, 0.4)';
