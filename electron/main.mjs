@@ -270,15 +270,20 @@ app.whenReady().then(() => {
       };
     }
 
-    // 验证 spritesheet 文件是否存在
+    // 验证 spritesheet 文件是否存在，读取为 Base64 data URL（避免渲染进程加载 file:/// 或 HTTP 的时序问题）
     const ssPath = path.join(petPath, raw.sprite.url);
+    let spritesheetDataUrl = null;
     if (!fs.existsSync(ssPath)) {
       logger.error('Main', `spritesheet 文件不存在: ${ssPath}`);
     } else {
       logger.info('Main', `spritesheet 已确认存在: ${ssPath} (${fs.statSync(ssPath).size} bytes)`);
+      const ssBuffer = fs.readFileSync(ssPath);
+      const ext = path.extname(ssPath).toLowerCase();
+      const mime = ext === '.png' ? 'image/png' : 'image/webp';
+      spritesheetDataUrl = `data:${mime};base64,${ssBuffer.toString('base64')}`;
     }
 
-    return { id: petId, path: petPath, manifest: raw, spritesheetUrl: `http://localhost:3001/api/pets/${petId}/spritesheet` };
+    return { id: petId, path: petPath, manifest: raw, spritesheetUrl: `http://localhost:3001/api/pets/${petId}/spritesheet`, spritesheetDataUrl };
   }
 
   ipcMain.on('pet:activate', (_event, petData) => {

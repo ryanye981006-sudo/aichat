@@ -272,9 +272,10 @@
 
     resizeCanvas();
 
-    // 加载 spritesheet — 优先用主进程传来的 HTTP URL，回退到 file://
-    const ssUrl = petData.spritesheetUrl || ('file:///' + (petPath + '/' + (petManifest.sprite.url || petManifest.spritesheetPath || 'spritesheet.webp')).replace(/\\/g, '/').replace(/^\//, ''));
-    petLog('INFO', '加载 spritesheet: ' + ssUrl);
+    // 加载 spritesheet — 优先用主进程传来的 Base64 data URL（最可靠）
+    const ssUrl = petData.spritesheetDataUrl || petData.spritesheetUrl;
+    const displayUrl = petData.spritesheetDataUrl ? '(base64 data URL)' : ssUrl;
+    petLog('INFO', '加载 spritesheet: ' + displayUrl);
 
     const img = new Image();
     img.onload = function () {
@@ -283,13 +284,12 @@
       setState('idle');
     };
     img.onerror = function () {
-      petLog('ERROR', 'spritesheet 加载失败! URL: ' + ssUrl);
+      petLog('ERROR', 'spritesheet 加载失败!');
       // 在 canvas 上显示错误信息
       ctx.fillStyle = 'rgba(255,80,80,0.9)';
       ctx.font = '11px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('spritesheet 加载失败', canvas.width / 2, canvas.height / 2 - 10);
-      ctx.fillText(ssUrl.split('/').pop(), canvas.width / 2, canvas.height / 2 + 10);
       ctx.textAlign = 'start';
     };
 
