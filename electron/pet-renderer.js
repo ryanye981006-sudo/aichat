@@ -37,12 +37,14 @@
   // === DOM ===
   const canvas = document.getElementById('pet-canvas');
   const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+  ctx.imageSmoothingEnabled = false;
 
   // 离屏 Canvas 双缓冲：先在离屏绘制整帧，再一次 blit 到可见画布，消除闪烁
   const offscreen = document.createElement('canvas');
   offscreen.width = 192;
   offscreen.height = 208;
   const offCtx = offscreen.getContext('2d', { alpha: true });
+  offCtx.imageSmoothingEnabled = false;
 
   // === 运行时状态 ===
   let spritesheet = null;
