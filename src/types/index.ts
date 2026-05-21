@@ -114,6 +114,8 @@ export interface FileAttachment {
   mimeType: string;         // "image/png" | "application/pdf" | ...
   dataUrl: string;          // 缩略图/预览 base64 data URL
   category: 'image' | 'document' | 'text';
+  _file?: File;             // 原始 File 引用（内部使用，不序列化到服务端）
+  uploadResult?: ChatFileUploadResult;  // 文档上传后的解析结果
 }
 
 // 后端文件上传响应

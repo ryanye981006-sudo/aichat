@@ -132,6 +132,7 @@ export default function ChatArea({
       id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       name: file.name, size: file.size,
       mimeType: file.type || 'application/octet-stream', dataUrl, category,
+      _file: file,
     };
   };
 

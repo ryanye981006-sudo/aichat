@@ -160,7 +160,7 @@ export function chatSSE(
       conversation_id: conversationId,
       message,
       thinking_mode: thinkingMode,
-      files: files,
+      files: files?.map(({ _file, ...rest }) => rest),
       web_search_enabled: options?.webSearchEnabled,
       memory_enabled: options?.memoryEnabled,
     }),

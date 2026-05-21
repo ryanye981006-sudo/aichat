@@ -6,10 +6,11 @@ import AssistantSelectModal from './components/AssistantSelectModal';
 import ModelSelectModal from './components/shared/ModelSelectModal';
 import SettingsArea from './components/SettingsArea';
 import WindowFrame from './components/WindowFrame';
-import type { Assistant, Provider, Model, Conversation, Message, ConversationUIState } from './types';
-import { assistantsApi, conversationsApi, messagesApi, providersApi, modelsApi, chatSSE, regenerateSSE } from './services/api';
+import type { Assistant, Provider, Model, Conversation, Message, ConversationUIState, FileAttachment } from './types';
+import { assistantsApi, conversationsApi, messagesApi, providersApi, modelsApi, chatSSE, chatFileApi, regenerateSSE } from './services/api';
 import { generateId } from './lib/utils';
 import { createStreamCallbacks } from './lib/streamCallbacks';
+import { isVisionModel } from './lib/vision';
 
 export default function App() {
   // ===== 核心状态 =====
@@ -335,11 +336,38 @@ export default function App() {
   };
 
   // ===== 发送消息 =====
-  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', files?: import('./types').FileAttachment[]) => {
+  const handleSendMessage = useCallback(async (content: string, thinkingMode: string = 'default', files?: FileAttachment[]) => {
     if (!currentAssistantId) return;
 
     // 只阻止当前活跃会话在流式时发送消息
     if (isStreaming && streamingConversationId === currentConversationId) return;
+
+    // 预处理文件：文档/文本类文件需先上传到后端解析提取文本
+    let processedFiles: FileAttachment[] | undefined = files;
+    if (files && files.length > 0) {
+      const currentAssistant = assistants.find(a => a.id === currentAssistantId);
+      const currentModel = models.find(m => m.id === currentAssistant?.model_id);
+      const visionModel = isVisionModel(currentModel);
+
+      const uploadResults = await Promise.all(
+        files.map(async (f) => {
+          // 图片文件已有 dataUrl，无需上传
+          if (f.category === 'image' && f.dataUrl) return f;
+          // 文档/文本文件：上传到后端解析
+          if (f._file) {
+            try {
+              const result = await chatFileApi.upload(f._file, visionModel);
+              return { ...f, uploadResult: result };
+            } catch (err: any) {
+              console.error(`文件上传失败 ${f.name}:`, err);
+              return { ...f, uploadResult: { filePath: '', fileName: f.name, mimeType: f.mimeType, extractedText: `[文件 ${f.name} 解析失败: ${err.message}]`, isScannedPdf: false } };
+            }
+          }
+          return f;
+        })
+      );
+      processedFiles = uploadResults;
+    }
 
     let activeConvId = currentConversationId;
 
@@ -420,10 +448,10 @@ export default function App() {
           }
         }
       },
-    }, files, { webSearchEnabled: currentUIState.webSearchEnabled });
+    }, processedFiles, { webSearchEnabled: currentUIState.webSearchEnabled });
     abortControllersRef.current[activeConvRef.current] = controller;
     setAbortController(controller);
-  }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length]);
+  }, [currentAssistantId, currentConversationId, isStreaming, streamingConversationId, messages.length, assistants, models]);
 
   // ===== 重新生成 =====
   const handleRegenerate = useCallback(async (messageId: string, thinkingMode: string = 'default') => {

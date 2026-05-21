@@ -2,6 +2,7 @@
 import { Router, Request, Response } from 'express';
 import { getDb } from '../db/connection.js';
 import { aiSdkService as aiService } from '../services/AiSdkService.js';
+import type { MessageContentPart } from '../services/AiSdkService.js';
 import { memoryService } from '../services/MemoryService.js';
 import { loaderService } from '../services/LoaderService.js';
 import { userProfileService } from '../services/UserProfileService.js';
@@ -27,7 +28,7 @@ function isQwenModel(modelName: string): boolean {
 }
 
 router.post('/completions', async (req: Request, res: Response) => {
-  const { assistant_id, conversation_id, message, thinking_mode, web_search_enabled, memory_enabled } = req.body;
+  const { assistant_id, conversation_id, message, thinking_mode, web_search_enabled, memory_enabled, files } = req.body;
 
   if (!assistant_id || !message) {
     res.status(400).json({ error: 'assistant_id 和 message 不能为空' });
@@ -159,7 +160,7 @@ router.post('/completions', async (req: Request, res: Response) => {
   // 桌宠事件：用户输入已处理
   emitUserInputStart(activeConvId, assistant.name, message.length);
 
-  const chatMessages = [
+  const chatMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: any }> = [
     { role: 'system' as const, content: systemContent },
     ...historySlice
       .filter((m: any) => m.role !== 'system')
@@ -169,11 +170,43 @@ router.post('/completions', async (req: Request, res: Response) => {
       })),
   ];
 
+  // 注入文件内容到最后一条用户消息（多模态）
+  const requestFiles: any[] = files || [];
+  if (requestFiles.length > 0) {
+    const lastUserIdx = chatMessages.map(m => m.role).lastIndexOf('user');
+    if (lastUserIdx >= 0) {
+      const parts: MessageContentPart[] = [
+        { type: 'text', text: message || '请分析下列文件' },
+      ];
+      for (const file of requestFiles) {
+        if (file.category === 'image' && file.dataUrl) {
+          parts.push({ type: 'image', image: file.dataUrl });
+        } else if (file.uploadResult) {
+          if (file.uploadResult.extractedText) {
+            parts.push({ type: 'text', text: `\n\n--- 文件: ${file.name} ---\n${file.uploadResult.extractedText}\n--- 文件结束 ---` });
+          }
+          if (file.uploadResult.images?.length) {
+            for (const img of file.uploadResult.images) {
+              parts.push({ type: 'image', image: img.dataUrl });
+            }
+          }
+        }
+      }
+      chatMessages[lastUserIdx].content = parts;
+    }
+  }
+
   // Qwen 模型关闭思考时，在最后一条用户消息末尾追加 /no_think（兜底控制）
   if (thinkingMode === 'disabled' && isQwenModel(modelName)) {
     const lastUser = [...chatMessages].reverse().find(m => m.role === 'user');
     if (lastUser) {
-      lastUser.content = lastUser.content + ' /no_think';
+      if (typeof lastUser.content === 'string') {
+        lastUser.content = lastUser.content + ' /no_think';
+      } else if (Array.isArray(lastUser.content)) {
+        const textPart = lastUser.content.find((p: any) => p.type === 'text');
+        if (textPart) textPart.text += ' /no_think';
+        else lastUser.content.push({ type: 'text', text: '/no_think' });
+      }
     }
   }
 

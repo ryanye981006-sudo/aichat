@@ -19,9 +19,15 @@ function translateError(err: any, defaultMsg: string = '未知错误'): string {
   return msg
 }
 
+export type MessageContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string }
+
+export type MessageContent = string | MessageContentPart[]
+
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: MessageContent
 }
 
 export interface StreamCallbacks {
@@ -154,7 +160,7 @@ export class AiSdkService {
 
       streamResult = await _streamText({
         model: sdkModel,
-        messages,
+        messages: messages as any,
         temperature,
         abortSignal,
         ...(tools ? { tools, stopWhen: stepCountIs((maxSteps ?? 3) + 1) } : {}),
@@ -312,7 +318,7 @@ export class AiSdkService {
 
     const result = await _generateText({
       model: createModel(provider, model),
-      messages,
+      messages: messages as any,
       temperature,
       abortSignal,
     })
